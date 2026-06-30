@@ -1,0 +1,22 @@
+# Секрети
+.env
+
+# Віртуальне середовище
+.venv/
+venv/
+env/
+
+# Python кеш
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE налаштування
+.idea/
+
+# Telegram сесії (їх не треба пушити)
+*.session
+
+# Логи та бази
+*.log
+celerybeat-schedule
