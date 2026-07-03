@@ -52,12 +52,14 @@ class Game:
 
         self.reset_game(new_map=True)
 
-    def reset_game(self, new_map=True):
-        # Очищення сцени
+    def reset_game(self, new_map=True, new_level=False):
+        # Якщо це перехід на наступний рівень, можна зберігати або частково відновлювати HP/Броню гравця
+        # Якщо це рестарт після смерті (new_level=False), створюємо нового чищення гравця
+        self.player = Player(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
+
+        # Очищення сцени та груп спрайтів
         for sprite in self.all_sprites:
             sprite.kill()
-
-        self.player = Player(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
 
         self.all_sprites = pygame.sprite.Group(self.player)
         self.bullets = pygame.sprite.Group()
@@ -86,8 +88,12 @@ class Game:
             self.hiding_spots.add(spot)
             self.all_sprites.add(spot)
 
-        # Спавн ворогів у безпечних зонах
-        num_enemies = random.randint(2, 4)
+        # Динамічний спавн ворогів: якщо новий рівень, можна збільшити їхню кількість
+        if new_level:
+            num_enemies = random.randint(4, 6)  # На наступному рівні ворогів більше!
+        else:
+            num_enemies = random.randint(2, 4)  # Базова кількість для першої спроби
+
         spawn_positions = MapGenerator.get_enemy_spawn_positions(
             self.game_matrix, self.saved_hiding_spots_data, self.player.pos, count=num_enemies
         )
@@ -104,30 +110,43 @@ class Game:
             if event.type == pygame.QUIT:
                 self.running = False
 
+            # СТАН: ГОЛОВНЕ МЕНЮ
             elif self.game_state == "MENU":
                 if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_1:
-                        self.reset_game(new_map=True)
+                    if event.key in [pygame.K_1, pygame.K_SPACE]: # Запуск на 1 або Пробіл
+                        self.reset_game(new_map=True, new_level=False)
                         self.game_state = "PLAYING"
                     elif event.key == pygame.K_ESCAPE:
                         self.running = False
 
-            elif self.game_state in ["GAME_OVER", "VICTORY"]:
+            # СТАН: ПОРАЗКА (GAME_OVER)
+            elif self.game_state == "GAME_OVER":
                 if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_r:
-                        self.reset_game(new_map=False)  # Граємо на тій самій карті
+                    if event.key == pygame.K_r: # Рестарт на ТІЙ САМІЙ карті (робота над помилками)
+                        self.reset_game(new_map=False, new_level=False)
                         self.game_state = "PLAYING"
-                    elif event.key == pygame.K_m:
+                    elif event.key == pygame.K_SPACE: # Спробувати знову на НОВІЙ карті
+                        self.reset_game(new_map=True, new_level=False)
+                        self.game_state = "PLAYING"
+                    elif event.key in [pygame.K_m, pygame.K_ESCAPE]: # Повернення в меню
                         self.game_state = "MENU"
-                    elif event.key == pygame.K_ESCAPE:
-                        self.running = False
 
+            # СТАН: ПЕРЕМОГА (VICTORY)
+            elif self.game_state == "VICTORY":
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_SPACE: # Наступний рівень (Генерація нової карти + більше ворогів)
+                        self.reset_game(new_map=True, new_level=True)
+                        self.game_state = "PLAYING"
+                    elif event.key in [pygame.K_m, pygame.K_ESCAPE]: # Вихід в меню
+                        self.game_state = "MENU"
+
+            # СТАН: ІГРОВИЙ ПРОЦЕС (PLAYING)
             elif self.game_state == "PLAYING":
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_1: self.player.change_weapon(0)
                     if event.key == pygame.K_2: self.player.change_weapon(1)
                     if event.key == pygame.K_3: self.player.change_weapon(2)
-                    if event.key == pygame.K_r: self.reset_game(new_map=True)
+                    if event.key == pygame.K_r: self.reset_game(new_map=True, new_level=False) # Швидкий рестарт рівня
 
                     if event.key == pygame.K_e:
                         if self.player.is_hidden:
@@ -371,6 +390,7 @@ class Game:
             # Малювання смужок здоров'я ворогів з урахуванням камери
             for enemy in self.enemies:
                 enemy.draw_health_bar(self.screen, self.camera)
+                enemy.draw_suspicion_bar(self.screen, self.camera)
 
             # Малювання куль через камеру
             for bullet in self.bullets:

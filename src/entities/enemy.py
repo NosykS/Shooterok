@@ -43,6 +43,10 @@ class Enemy(pygame.sprite.Sprite):
         self.rotation_vector = pygame.math.Vector2(1, 0).rotate(random.randint(0, 360))
         self.is_alerted = False
 
+        self.suspicion = 0.0  # Рівень підозри від 0.0 до 1.0
+        self.suspicion_speed = 1.5  # Як швидко заповнюється (1.5 означає ~0.6 секунди до тривоги)
+        self.cool_down_speed = 0.8  # Як швидко ворог заспокоюється, коли втратив нас
+
         # Стелс-таймери та координати погоні
         self.last_known_player_pos = None
         self.lose_interest_timer = ENEMY_LOSE_INTEREST_TIME
@@ -89,6 +93,36 @@ class Enemy(pygame.sprite.Sprite):
             if current_armor_width > 0:
                 pygame.draw.rect(screen, (0, 150, 255),
                                  pygame.Rect(bar_x, armor_y, current_armor_width, armor_bar_height))
+
+    def draw_suspicion_bar(self, screen, camera):
+        """Малює індикатор підозри над головою ворога під час засікання"""
+        # Малюємо лише тоді, коли є підозра, але ворог ще не почав повноцінну погоню
+        if self.suspicion <= 0 or self.is_alerted:
+            return
+
+        bar_width = 40
+        bar_height = 5
+
+        # Розрахунок позиції з урахуванням камери (малюємо трохи вище смужки HP)
+        bar_x = (self.pos.x + camera.camera_rect.x) - bar_width // 2
+        bar_y = (self.pos.y + camera.camera_rect.y) - 40  # На 10 пікселів вище ніж HP bar
+
+        # Фон індикатора (темно-сірий)
+        pygame.draw.rect(screen, (40, 40, 40), pygame.Rect(bar_x, bar_y, bar_width, bar_height))
+
+        # Колір плавно переходить від чисто жовтого до червоного залежно від шкали
+        red = 255
+        green = int(220 * (1.0 - self.suspicion))
+        blue = 0
+        color = (red, green, blue)
+
+        # Ширина заповнення
+        current_fill_width = int(bar_width * self.suspicion)
+        if current_fill_width > 0:
+            pygame.draw.rect(screen, color, pygame.Rect(bar_x, bar_y, current_fill_width, bar_height))
+
+        # Тонка чорна рамка для краси
+        pygame.draw.rect(screen, (0, 0, 0), pygame.Rect(bar_x, bar_y, bar_width, bar_height), 1)
 
     def draw_vision_cone(self, screen, camera):
         """ФІКС: Змінено знак мінуса на плюс для точного накладання конуса зору"""
@@ -171,29 +205,56 @@ class Enemy(pygame.sprite.Sprite):
 
     def update(self, player, game_matrix, obstacles):
         self.fired_bullet = None
-        if self.is_alerted:
-            self.view_radius = self.base_view_radius * 2.5
-            self.view_angle = min(360, self.base_view_angle + 80)
-            self.speed = self.stats["speed"]
-        else:
+
+        # 1. Перевіряємо, чи бачить ворог гравця в цей момент
+        can_see_player = self.check_for_player(player, obstacles)
+
+        # 2. Логіка індикатора підозри (Керування станом спокою/тривоги)
+        if not self.is_alerted:
+            # Ворог спокійний
             self.view_radius = self.base_view_radius
             self.view_angle = self.base_view_angle
             from src.settings import ENEMY_TYPES
             self.speed = ENEMY_TYPES["rookie"]["speed"]
 
-        can_see_player = self.check_for_player(player, obstacles)
+            if can_see_player:
+                # Гравець на очах — підозра зростає (заповниться за ~30-40 кадрів)
+                self.suspicion += 0.025
+                if self.suspicion >= 1.0:
+                    self.suspicion = 1.0
+                    self.is_alerted = True  # ПЕРЕХІД У РЕЖИМ ТРИВОГИ
+                    self.last_known_player_pos = pygame.math.Vector2(player.pos)
+                    self.lose_interest_timer = ENEMY_LOSE_INTEREST_TIME
+                    self.patrol_wait_timer = 0
+                    self.path = []
+            else:
+                # Гравця не видно — підозра спадає
+                self.suspicion -= 0.015
+                if self.suspicion < 0:
+                    self.suspicion = 0.0
+        else:
+            # Ворог ВЖЕ у стані тривоги
+            self.suspicion = 1.0
+            self.view_radius = self.base_view_radius * 2.5
+            self.view_angle = min(360, self.base_view_angle + 80)
+            self.speed = self.stats["speed"]
 
+            if can_see_player:
+                # Продовжує бачити під час погоні
+                self.last_known_player_pos = pygame.math.Vector2(player.pos)
+                self.lose_interest_timer = ENEMY_LOSE_INTEREST_TIME
+                self.patrol_wait_timer = 0
+                self.path = []
+
+        # 3. Визначаємо поведінку руху на основі стану тривоги
         move_straight_to_player = False
         target_pos = None
 
-        if can_see_player:
-            self.is_alerted = True
-            self.last_known_player_pos = pygame.math.Vector2(player.pos)
-            self.lose_interest_timer = ENEMY_LOSE_INTEREST_TIME
-            self.patrol_wait_timer = 0
+        if self.is_alerted and can_see_player:
+            # Атакуємо прямо, тільки якщо активована тривога І ми бачимо ціль
             move_straight_to_player = True
-            self.path = []
         elif self.is_alerted:
+            # В тривозі, але втратили з поля зору — йдемо до останньої точки
             if self.last_known_player_pos:
                 if self.pos.distance_to(self.last_known_player_pos) <= 15:
                     self.path = []
@@ -201,12 +262,15 @@ class Enemy(pygame.sprite.Sprite):
                     if self.lose_interest_timer <= 0:
                         self.is_alerted = False
                         self.last_known_player_pos = None
+                        self.suspicion = 0.0  # Скидаємо підозру при заспокоєнні
                 else:
                     target_pos = self.last_known_player_pos
             else:
                 self.is_alerted = False
+                self.suspicion = 0.0
 
         if not self.is_alerted and self.patrol_points:
+            # Звичайне патрулювання, коли немає тривоги
             current_target = self.patrol_points[self.current_patrol_idx]
             if self.pos.distance_to(current_target) <= 15:
                 self.path = []
