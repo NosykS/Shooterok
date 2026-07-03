@@ -20,3 +20,7 @@ __pycache__/
 # Логи та бази
 *.log
 celerybeat-schedule
+
+litellm_config.yaml
+structura.md
+.aider*
