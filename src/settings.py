@@ -57,7 +57,7 @@ WEAPONS = {
         "shoot_cooldown": 500
     },
     "pistol_silenced": {
-        "damage": 25,
+        "damage": 60,
         "fire_rate": 400,
         "noise_radius": 60,
         "ammo_capacity": 12,
