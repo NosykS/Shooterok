@@ -1,4 +1,4 @@
-# src/enemy.py
+# src/entities/enemy.py
 import pygame
 import math
 import random
@@ -60,60 +60,55 @@ class Enemy(pygame.sprite.Sprite):
         self.fired_bullet = None
 
     # ФІКС ВІДСТУПІВ: Тепер метод знаходиться на рівні класу, як і має бути!
-    def draw_health_bar(self, screen):
-        # Якщо ворог мертвий, нічого не малюємо
+    def draw_health_bar(self, screen, camera):
+        """ФІКС: Змінено знак мінуса на плюс для правильного позиціонування камери"""
         if self.hp <= 0:
             return
 
-        # Налаштування розмірів смужки
         bar_width = 40
         bar_height = 4
-        # Малюємо смужку на 30 пікселів вище центру ворога
-        bar_x = self.pos.x - bar_width // 2
-        bar_y = self.pos.y - 30
+
+        # ФІКС: додаємо координати камери, оскільки значення camera_rect від'ємні
+        bar_x = (self.pos.x + camera.camera_rect.x) - bar_width // 2
+        bar_y = (self.pos.y + camera.camera_rect.y) - 30
 
         # 1. МАЛЮЄМО СМУЖКУ HP
-        # Темний фон (задник)
         pygame.draw.rect(screen, (80, 0, 0), pygame.Rect(bar_x, bar_y, bar_width, bar_height))
-        # Зелена або червона смужка поточного HP
         hp_pct = max(0, self.hp / self.max_hp)
         current_hp_width = int(bar_width * hp_pct)
         if current_hp_width > 0:
             pygame.draw.rect(screen, (0, 255, 100), pygame.Rect(bar_x, bar_y, current_hp_width, bar_height))
 
-        # 2. МАЛЮЄМО СМУЖКУ БРОНІ (тільки якщо у цього типу ворога взагалі є броня)
+        # 2. МАЛЮЄМО СМУЖКУ БРОНІ
         if self.max_armor > 0:
             armor_bar_height = 3
-            # Смужка броні буде одразу під смужкою HP (на 5 пікселів нижче)
             armor_y = bar_y + bar_height + 1
-
-            # Темний фон броні
             pygame.draw.rect(screen, (0, 0, 80), pygame.Rect(bar_x, armor_y, bar_width, armor_bar_height))
-
-            # Синя смужка поточної броні
             armor_pct = max(0, self.armor / self.max_armor)
             current_armor_width = int(bar_width * armor_pct)
             if current_armor_width > 0:
                 pygame.draw.rect(screen, (0, 150, 255),
                                  pygame.Rect(bar_x, armor_y, current_armor_width, armor_bar_height))
 
-    def draw_vision_cone(self, screen):
-        """Малює напівпрозорий сектор зору ворога на екрані."""
+    def draw_vision_cone(self, screen, camera):
+        """ФІКС: Змінено знак мінуса на плюс для точного накладання конуса зору"""
         cone_color = (255, 0, 0, 40) if self.is_alerted else (0, 255, 0, 30)
 
         from src.settings import SCREEN_WIDTH, SCREEN_HEIGHT
         vision_surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
 
-        points = [self.pos]
+        # ФІКС: додаємо координати камери до позиції ворога у світі
+        screen_pos = self.pos + pygame.math.Vector2(camera.camera_rect.x, camera.camera_rect.y)
+        points = [screen_pos]
+
         num_segments = 30
         _, current_angle = self.rotation_vector.as_polar()
-
         start_angle = current_angle - self.view_angle / 2
 
         for i in range(num_segments + 1):
             angle = start_angle + (self.view_angle / num_segments) * i
             rad = math.radians(angle)
-            target_point = self.pos + pygame.math.Vector2(math.cos(rad), math.sin(rad)) * self.view_radius
+            target_point = screen_pos + pygame.math.Vector2(math.cos(rad), math.sin(rad)) * self.view_radius
             points.append(target_point)
 
         if len(points) >= 3:

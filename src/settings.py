@@ -9,6 +9,14 @@ GRID_HEIGHT = 24
 SCREEN_WIDTH = GRID_WIDTH * TILE_SIZE   # 40 * 32 = 1280
 SCREEN_HEIGHT = GRID_HEIGHT * TILE_SIZE # 24 * 32 = 768
 
+# РОЗМІР ВЕЛИКОГО ІГРОВОГО СВІТУ (Світ, по якому рухається камера)
+# Зробимо карту, наприклад, 100х100 або 80х60 клітинок
+WORLD_GRID_WIDTH = 90  # Клітинок в ширину (90 * 32 = 2880 пікселів)
+WORLD_GRID_HEIGHT = 60 # Клітинок в висоту (60 * 32 = 1920 пікселів)
+
+WORLD_WIDTH = WORLD_GRID_WIDTH * TILE_SIZE
+WORLD_HEIGHT = WORLD_GRID_HEIGHT * TILE_SIZE
+
 # Кольори
 BG_COLOR = (30, 30, 40)
 WHITE = (255, 255, 255)

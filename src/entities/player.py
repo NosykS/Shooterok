@@ -1,6 +1,7 @@
-# src/player.py
+# src/entities/player.py
 import pygame
-from src.settings import SCREEN_WIDTH, SCREEN_HEIGHT, WEAPONS, PLAYER_SPEED_NORMAL, PLAYER_SPEED_STEALTH, \
+# Імпортуємо нові параметри великого світу замість екрану
+from src.settings import WORLD_WIDTH, WORLD_HEIGHT, WEAPONS, PLAYER_SPEED_NORMAL, PLAYER_SPEED_STEALTH, \
     PLAYER_NOISE_NORMAL, PLAYER_NOISE_STEALTH
 from src.objects.bullet import Bullet
 
@@ -30,7 +31,7 @@ class Player(pygame.sprite.Sprite):
         self.weapons = ["knife", "pistol_silenced", "rifle"]
         self.current_weapon_index = 1
 
-        # ДОДАНО: Зберігаємо точний час останнього пострілу/атаки в мілісекундах
+        # Зберігаємо точний час останнього пострілу/атаки в мілісекундах
         self.last_shot_time = 0
 
     def _create_placeholder_image(self):
@@ -50,7 +51,6 @@ class Player(pygame.sprite.Sprite):
         # Перевірка на стелс-ходьбу (затиснутий Shift)
         if keys[pygame.K_LSHIFT]:
             self.speed = PLAYER_SPEED_STEALTH
-            # Якщо гравець іде на Шифті, але стоїть на місці — шуму 0. Якщо йде — PLAYER_NOISE_STEALTH (0)
             self.current_noise_radius = PLAYER_NOISE_STEALTH
         else:
             self.speed = PLAYER_SPEED_NORMAL
@@ -84,11 +84,11 @@ class Player(pygame.sprite.Sprite):
                 if dy < 0: self.hitbox.top = obstacle.rect.bottom
                 self.pos.y = self.hitbox.centery
 
-        # Обмеження екрану
+        # ЗМІНЕНО: Обмеження тепер діють на весь ВЕЛИКИЙ СВІТ, а не лише екран
         if self.pos.x < 0: self.pos.x = 0
-        if self.pos.x > SCREEN_WIDTH: self.pos.x = SCREEN_WIDTH
+        if self.pos.x > WORLD_WIDTH: self.pos.x = WORLD_WIDTH
         if self.pos.y < 0: self.pos.y = 0
-        if self.pos.y > SCREEN_HEIGHT: self.pos.y = SCREEN_HEIGHT
+        if self.pos.y > WORLD_HEIGHT: self.pos.y = WORLD_HEIGHT
 
         self.hitbox.center = self.pos
 
@@ -96,10 +96,16 @@ class Player(pygame.sprite.Sprite):
         if dx == 0 and dy == 0:
             self.current_noise_radius = 0
 
-    def rotate_to_mouse(self):
+    def rotate_to_mouse(self, camera):
+        """ЗМІНЕНО: тепер метод приймає об'єкт камери, щоб коригувати позицію миші"""
         if self.is_hidden: return
+
+        # Переводимо координати миші з екрану у великий світ
         mouse_x, mouse_y = pygame.mouse.get_pos()
-        direction = pygame.math.Vector2(mouse_x - self.pos.x, mouse_y - self.pos.y)
+        world_mouse_x = mouse_x - camera.camera_rect.x
+        world_mouse_y = mouse_y - camera.camera_rect.y
+
+        direction = pygame.math.Vector2(world_mouse_x - self.pos.x, world_mouse_y - self.pos.y)
         _, angle = direction.as_polar()
         angle = -angle
         self.image = pygame.transform.rotate(self.base_image, angle)
@@ -110,27 +116,27 @@ class Player(pygame.sprite.Sprite):
             self.current_weapon_index = index
             print(f"Зброя змінена на: {self.weapons[index]}")
 
-    def attack(self):
+    def attack(self, camera):
+        """ЗМІНЕНО: метод приймає камеру для точного розрахунку вектору польоту кулі"""
         if self.is_hidden:
-            return None  # Зі схованки стріляти не можна
+            return None
 
-        # ДОДАНО: Перевіряємо кулдаун за системним часом Pygame
         current_time = pygame.time.get_ticks()
         weapon_stats = WEAPONS[self.current_weapon]
 
-        # Якщо з моменту минулої атаки пройшло менше мілісекунд, ніж вказано в shoot_cooldown — блокуємо постріл
         if current_time - self.last_shot_time < weapon_stats["shoot_cooldown"]:
             return None
 
-        # Оновлюємо час останньої успішної атаки
         self.last_shot_time = current_time
 
-        # Якщо обрано ніж — повертаємо маркер ближнього бою
         if self.current_weapon == "knife":
             return "melee"
 
-        mouse_pos = pygame.mouse.get_pos()
-        dir_vector = pygame.math.Vector2(mouse_pos) - self.pos
+        # Коригуємо мишу під координати світу
+        mouse_x, mouse_y = pygame.mouse.get_pos()
+        world_mouse = pygame.math.Vector2(mouse_x - camera.camera_rect.x, mouse_y - camera.camera_rect.y)
+
+        dir_vector = world_mouse - self.pos
 
         if dir_vector.length() > 0:
             _, angle = dir_vector.as_polar()
@@ -149,6 +155,7 @@ class Player(pygame.sprite.Sprite):
 
         return None
 
-    def update(self, keys, obstacles):
+    def update(self, keys, obstacles, camera):
+        """ЗМІНЕНО: передаємо камеру всередину update"""
         self.handle_movement(keys, obstacles)
-        self.rotate_to_mouse()
+        self.rotate_to_mouse(camera)

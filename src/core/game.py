@@ -14,6 +14,8 @@ from src.core.ui import (
     draw_menu, draw_game_over, draw_victory,
     draw_controls_help, draw_player_bars, draw_game_ui
 )
+from src.settings import WORLD_WIDTH, WORLD_HEIGHT
+from src.core.camera import Camera
 
 
 class Game:
@@ -31,6 +33,9 @@ class Game:
         self.obstacles = pygame.sprite.Group()
         self.hiding_spots = pygame.sprite.Group()
         self.game_matrix = None
+
+        # Ініціалізуємо камеру, передаючи повні піксельні розміри нашого великого світу
+        self.camera = Camera(WORLD_WIDTH, WORLD_HEIGHT)
 
         # Пам'ять карти для перезапуску після смерті
         self.saved_game_matrix = None
@@ -134,13 +139,19 @@ class Game:
                                 self.player.pos = pygame.math.Vector2(hit_spot.rect.center)
 
     def execute_knife_attack(self):
-        """Обробляє конус ураження та логіку ближнього бою ножем."""
+        """ФІКС: Обробляє атаку ножем з урахуванням світових координат миші."""
         self.knife_attack_radius = WEAPONS["knife"].get("damage_radius", 60)
         self.knife_visual_timer = 6
         self.knife_visual_pos = (int(self.player.pos.x), int(self.player.pos.y))
 
+        # ФІКС: Переводимо координати миші з екрану у великий світ
         mouse_pos = pygame.mouse.get_pos()
-        player_to_mouse = pygame.math.Vector2(mouse_pos) - self.player.pos
+        world_mouse_x = mouse_pos[0] - self.camera.camera_rect.x
+        world_mouse_y = mouse_pos[1] - self.camera.camera_rect.y
+        world_mouse = pygame.math.Vector2(world_mouse_x, world_mouse_y)
+
+        # Тепер обидва вектори у системі координат світу
+        player_to_mouse = world_mouse - self.player.pos
         player_angle = player_to_mouse.as_polar()[1] if player_to_mouse.length() > 0 else 0
 
         for enemy in list(self.enemies):
@@ -180,15 +191,15 @@ class Game:
             return
 
         keys = pygame.key.get_pressed()
-        is_moving_normally = self.player.current_noise_radius > 0 and (
-                keys[pygame.K_w] or keys[pygame.K_s] or keys[pygame.K_a] or keys[pygame.K_d])
+        # ФІКС: Змінено логіку перевірки руху (чиста перевірка натискання клавіш)
+        is_moving = keys[pygame.K_w] or keys[pygame.K_s] or keys[pygame.K_a] or keys[pygame.K_d]
 
-        self.player.update(keys, self.obstacles)
+        self.player.update(keys, self.obstacles, self.camera)
 
         # Обробка атак
         mouse_buttons = pygame.mouse.get_pressed()
         if mouse_buttons[0]:
-            attack_result = self.player.attack()
+            attack_result = self.player.attack(self.camera)
 
             if attack_result == "melee":
                 self.execute_knife_attack()
@@ -219,8 +230,8 @@ class Game:
                 self.bullets.add(enemy.fired_bullet)
                 self.all_sprites.add(enemy.fired_bullet)
 
-        # Звук кроків гравця приваблює ворогів
-        if is_moving_normally and not self.player.is_hidden:
+        # Звук кроків гравця приваблює ворогів (враховуємо, чи створює гравець шум)
+        if is_moving and self.player.current_noise_radius > 0 and not self.player.is_hidden:
             for enemy in self.enemies:
                 if enemy.pos.distance_to(self.player.pos) <= self.player.current_noise_radius:
                     enemy.is_alerted = True
@@ -284,30 +295,44 @@ class Game:
         elif self.game_state == "VICTORY":
             draw_victory(self.screen)
         elif self.game_state == "PLAYING":
+            # 1. Оновлюємо позицію камери відносно гравця
+            self.camera.update(self.player)
+
+            # 2. Очищаємо екран
             self.screen.fill(BG_COLOR)
 
-            for enemy in self.enemies:
-                enemy.draw_vision_cone(self.screen)
+            # --- МАЛЮВАННЯ ОБ'ЄКТІВ ІЗ ЗСУВОМ КАМЕРИ ---
 
-            # Малювання спалаху від пострілу
+            # Малювання конусів огляду ворогів
+            for enemy in self.enemies:
+                enemy.draw_vision_cone(self.screen, self.camera)
+
+            # ФІКС: Малювання спалаху від пострілу з ДОДАВАННЯМ камери (бо camera_rect від'ємний)
             if self.gunshot_visual_timer > 0:
                 s = pygame.Surface((self.gunshot_visual_radius * 2, self.gunshot_visual_radius * 2), pygame.SRCALPHA)
                 pygame.draw.circle(s, (100, 200, 255, 120), (self.gunshot_visual_radius, self.gunshot_visual_radius),
                                    self.gunshot_visual_radius, 4)
-                self.screen.blit(s, (
-                    self.gunshot_visual_pos[0] - self.gunshot_visual_radius,
-                    self.gunshot_visual_pos[1] - self.gunshot_visual_radius
-                ))
+
+                flash_x = self.gunshot_visual_pos[0] - self.gunshot_visual_radius + self.camera.camera_rect.x
+                flash_y = self.gunshot_visual_pos[1] - self.gunshot_visual_radius + self.camera.camera_rect.y
+                self.screen.blit(s, (flash_x, flash_y))
                 self.gunshot_visual_timer -= 1
 
-            # Малювання конуса удару ножем
+            # ФІКС: Малювання конуса удару ножем
             if self.knife_visual_timer > 0:
+                # Отримуємо світову позицію миші
                 mouse_pos = pygame.mouse.get_pos()
-                player_to_mouse = pygame.math.Vector2(mouse_pos) - self.player.pos
+                world_mouse = pygame.math.Vector2(mouse_pos[0] - self.camera.camera_rect.x,
+                                                  mouse_pos[1] - self.camera.camera_rect.y)
+
+                player_to_mouse = world_mouse - self.player.pos
                 player_angle = player_to_mouse.as_polar()[1] if player_to_mouse.length() > 0 else 0
 
                 knife_surf = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-                points = [self.player.pos]
+
+                # Точка центру гравця вже на екрані (застосовуємо зсув камери)
+                player_screen_pos = self.player.pos + pygame.math.Vector2(self.camera.camera_rect.topleft)
+                points = [player_screen_pos]
                 num_segments = 16
                 view_angle = 90
                 start_angle = player_angle - view_angle / 2
@@ -315,9 +340,10 @@ class Game:
                 for i in range(num_segments + 1):
                     ang = start_angle + (view_angle / num_segments) * i
                     rad = math.radians(ang)
-                    target_point = self.player.pos + pygame.math.Vector2(math.cos(rad),
-                                                                         math.sin(rad)) * self.knife_attack_radius
-                    points.append(target_point)
+                    # Рахуємо кінцеві точки у світі, а потім додаємо зсув камери
+                    world_point = self.player.pos + pygame.math.Vector2(math.cos(rad),
+                                                                        math.sin(rad)) * self.knife_attack_radius
+                    points.append(world_point + pygame.math.Vector2(self.camera.camera_rect.topleft))
 
                 if len(points) >= 3:
                     pygame.draw.polygon(knife_surf, (255, 50, 50, 50), points)
@@ -326,22 +352,31 @@ class Game:
                 self.screen.blit(knife_surf, (0, 0))
                 self.knife_visual_timer -= 1
 
+            # ФІКС: Малювання кола шуму гравця (теж через + self.camera.camera_rect)
             keys = pygame.key.get_pressed()
-            is_moving_normally = self.player.current_noise_radius > 0 and (
-                    keys[pygame.K_w] or keys[pygame.K_s] or keys[pygame.K_a] or keys[pygame.K_d])
+            is_moving = keys[pygame.K_w] or keys[pygame.K_s] or keys[pygame.K_a] or keys[pygame.K_d]
 
-            if is_moving_normally and not self.player.is_hidden:
-                pygame.draw.circle(self.screen, (0, 150, 255), (int(self.player.pos.x), int(self.player.pos.y)),
+            if is_moving and self.player.current_noise_radius > 0 and not self.player.is_hidden:
+                noise_x = int(self.player.pos.x + self.camera.camera_rect.x)
+                noise_y = int(self.player.pos.y + self.camera.camera_rect.y)
+                pygame.draw.circle(self.screen, (0, 150, 255), (noise_x, noise_y),
                                    self.player.current_noise_radius, 1)
 
+            # Малювання всіх спрайтів (стіни, кущі, вороги, гравець) через камеру
             for sprite in self.all_sprites:
-                if sprite == self.player and self.player.is_hidden: continue
-                self.screen.blit(sprite.image, sprite.rect)
+                if sprite == self.player and self.player.is_hidden:
+                    continue
+                self.screen.blit(sprite.image, self.camera.apply(sprite))
 
+            # Малювання смужок здоров'я ворогів з урахуванням камери
             for enemy in self.enemies:
-                enemy.draw_health_bar(self.screen)
+                enemy.draw_health_bar(self.screen, self.camera)
 
-            self.bullets.draw(self.screen)
+            # Малювання куль через камеру
+            for bullet in self.bullets:
+                self.screen.blit(bullet.image, self.camera.apply(bullet))
+
+            # --- МАЛЮВАННЯ ІНТЕРФЕЙСУ (БЕЗ КАМЕРИ) ---
             draw_player_bars(self.screen, self.player)
             draw_game_ui(self.screen, self.player, self.enemies, keys, WEAPONS)
             draw_controls_help(self.screen)
