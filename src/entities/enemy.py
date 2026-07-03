@@ -233,7 +233,7 @@ class Enemy(pygame.sprite.Sprite):
             if self.shoot_cooldown > 0:
                 self.shoot_cooldown -= 1
             else:
-                from src.bullet import Bullet
+                from src.objects.bullet import Bullet
                 from src.settings import WEAPONS
                 import random
 

@@ -2,7 +2,7 @@
 import pygame
 from src.settings import SCREEN_WIDTH, SCREEN_HEIGHT, WEAPONS, PLAYER_SPEED_NORMAL, PLAYER_SPEED_STEALTH, \
     PLAYER_NOISE_NORMAL, PLAYER_NOISE_STEALTH
-from src.bullet import Bullet
+from src.objects.bullet import Bullet
 
 
 class Player(pygame.sprite.Sprite):

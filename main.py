@@ -2,7 +2,7 @@
 import pygame
 import sys
 from src.settings import SCREEN_WIDTH, SCREEN_HEIGHT
-from src.game import Game
+from src.core.game import Game
 
 def main():
     # Ініціалізація Pygame та створення вікна

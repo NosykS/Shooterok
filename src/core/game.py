@@ -5,12 +5,12 @@ from src.settings import (
     SCREEN_WIDTH, SCREEN_HEIGHT, FPS, BG_COLOR, TILE_SIZE,
     ENEMY_LOSE_INTEREST_TIME, ENEMY_TYPES, WEAPONS
 )
-from src.player import Player
-from src.enemy import Enemy
-from src.obstacle import Obstacle
-from src.hiding_spot import HidingSpot
-from src.map_generator import MapGenerator
-from src.ui import (
+from src.entities.player import Player
+from src.entities.enemy import Enemy
+from src.objects.obstacle import Obstacle
+from src.objects.hiding_spot import HidingSpot
+from src.world.map_generator import MapGenerator
+from src.core.ui import (
     draw_menu, draw_game_over, draw_victory,
     draw_controls_help, draw_player_bars, draw_game_ui
 )
