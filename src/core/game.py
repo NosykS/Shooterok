@@ -15,17 +15,19 @@ from src.core.ui import (
     draw_controls_help, draw_player_bars, draw_game_ui,
     draw_gunshot_flash, draw_knife_swing, UIButton
 )
+from src.core.crosshair import CrosshairController
 from src.core.camera import Camera
 
 
 class Game:
     def __init__(self, screen):
+        """Ініціалізація головного ігрового ядра, менеджерів станів та ресурсів"""
         self.screen = screen
         self.clock = pygame.time.Clock()
         self.game_state = "MENU"
         self.running = True
 
-        # Створення груп спрайтів
+        # Створення груп спрайтів для рендерингу та колізій
         self.player = None
         self.all_sprites = pygame.sprite.Group()
         self.bullets = pygame.sprite.Group()
@@ -34,13 +36,14 @@ class Game:
         self.hiding_spots = pygame.sprite.Group()
         self.game_matrix = None
 
+        # Камера, яка слідує за гравцем у межах світу
         self.camera = Camera(WORLD_WIDTH, WORLD_HEIGHT)
 
-        # Пам'ять карти для перезапуску
+        # Пам'ять карти для перезапуску поточного генераційного пресету
         self.saved_game_matrix = None
         self.saved_hiding_spots_data = []
 
-        # Візуальні ефекти
+        # Візуальні ефекти та їхні таймери згасання
         self.gunshot_visual_timer = 0
         self.gunshot_visual_pos = (0, 0)
         self.gunshot_visual_radius = 0
@@ -49,16 +52,20 @@ class Game:
         self.knife_visual_pos = (0, 0)
         self.knife_attack_radius = WEAPONS["knife"].get("damage_radius", 60)
 
-        # --- ШРИФТИ ---
+        # Ініціалізація системних шрифтів Pygame
         pygame.font.init()
         self.pause_font_title = pygame.font.SysFont("Arial", 48, bold=True)
         self.pause_font_btn = pygame.font.SysFont("Arial", 22, bold=True)
 
+        # Початковий запуск генерації карти та інтерфейсу
         self.reset_game(new_map=True)
         self._init_ui_buttons()
 
+        # Екземпляр нашого нового контролера кастомного прицілу
+        self.crosshair_ctrl = CrosshairController()
+
     def _init_ui_buttons(self):
-        """Ініціалізація всіх екранних кнопок"""
+        """Ініціалізація інтерактивних UI кнопок для всіх типів екранів меню"""
         cx, cy = SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2
         b_color, h_color = (40, 45, 55), (60, 80, 110)
         red_b, red_h = (120, 35, 35), (160, 45, 45)
@@ -84,6 +91,7 @@ class Game:
         ]
 
     def reset_game(self, new_map=True, new_level=False):
+        """Повне або часткове скидання стану сцени для перезапуску або переходу на новий рівень"""
         self.player = Player(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
         self.gunshot_visual_timer = 0
         self.knife_visual_timer = 0
@@ -103,7 +111,7 @@ class Game:
         else:
             self.game_matrix = [row[:] for row in self.saved_game_matrix]
 
-        # Побудова стін та схованок
+        # Побудова фізичних стін (Obstacles)
         for r_idx, row in enumerate(self.game_matrix):
             for c_idx, val in enumerate(row):
                 if val == 0:
@@ -111,12 +119,13 @@ class Game:
                     self.obstacles.add(wall)
                     self.all_sprites.add(wall)
 
+        # Розміщення інтерактивних точок приховування (Hiding Spots)
         for pos_x, pos_y in self.saved_hiding_spots_data:
             spot = HidingSpot(pos_x, pos_y, TILE_SIZE, TILE_SIZE)
             self.hiding_spots.add(spot)
             self.all_sprites.add(spot)
 
-        # Спавн ворогів
+        # Розрахунок та спавн ворожих юнітів
         num_enemies = random.randint(4, 6) if new_level else random.randint(2, 4)
         spawn_positions = MapGenerator.get_enemy_spawn_positions(
             self.game_matrix, self.saved_hiding_spots_data, self.player.pos, count=num_enemies
@@ -126,10 +135,13 @@ class Game:
         for pos_x, pos_y in spawn_positions:
             chosen_type = random.choice(enemy_types_available)
             enemy = Enemy(pos_x, pos_y, chosen_type, game_matrix=self.game_matrix)
+            # Додаємо внутрішній таймер кулдауну для атаки впритул
+            enemy.melee_cooldown = 0
             self.enemies.add(enemy)
             self.all_sprites.add(enemy)
 
     def handle_events(self):
+        """Обробка глобальних системних подій операційної системи та введення користувача"""
         mouse_pos = pygame.mouse.get_pos()
         mouse_click = pygame.mouse.get_pressed()
 
@@ -144,6 +156,7 @@ class Game:
         self._update_ui_button_actions(mouse_pos, mouse_click)
 
     def _handle_playing_inputs(self, event):
+        """Обробка гарячих клавіш керування безпосередньо під час ігрового процесу"""
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
                 self.game_state = "PAUSE"
@@ -165,6 +178,7 @@ class Game:
                         self.player.pos = pygame.math.Vector2(hit_spot.rect.center)
 
     def _handle_menu_inputs(self, event):
+        """Обробка натискань клавіатури в інтерфейсах меню, екранах поразки чи перемоги"""
         if event.type == pygame.KEYDOWN:
             if self.game_state == "MENU":
                 if event.key in [pygame.K_1, pygame.K_SPACE]:
@@ -191,6 +205,7 @@ class Game:
                 self.game_state = "PLAYING"
 
     def _update_ui_button_actions(self, mouse_pos, mouse_click):
+        """Обробка кліків миші по активних кнопках поточного стану графічного інтерфейсу"""
         active_buttons = []
         if self.game_state == "MENU":
             active_buttons = self.main_menu_buttons
@@ -215,6 +230,7 @@ class Game:
                 self.running = False
 
     def execute_knife_attack(self):
+        """Розрахунок сектору ураження ближнього бою гравця при використанні ножа"""
         self.knife_attack_radius = WEAPONS["knife"].get("damage_radius", 60)
         self.knife_visual_timer = 6
         self.knife_visual_pos = (int(self.player.pos.x), int(self.player.pos.y))
@@ -249,6 +265,7 @@ class Game:
                     if enemy.hp <= 0: enemy.kill()
 
     def _handle_attacks(self):
+        """Перевірка стану тригерів атаки гравця (ЛКМ) та генерація відповідних снарядів або колізій ножа"""
         mouse_buttons = pygame.mouse.get_pressed()
         if mouse_buttons[0]:
             attack_result = self.player.attack(self.camera)
@@ -264,6 +281,7 @@ class Game:
                 self.gunshot_visual_radius = weapon_stats["noise_radius"]
 
     def _check_environmental_sounds(self):
+        """Сканування світу на звукові радіуси шуму: привернення уваги ШІ кроками або пострілами"""
         if self.player.current_noise_radius > 0 and not self.player.is_hidden:
             for enemy in self.enemies:
                 if enemy.pos.distance_to(self.player.pos) <= self.player.current_noise_radius:
@@ -271,7 +289,45 @@ class Game:
                     enemy.last_known_player_pos = pygame.math.Vector2(self.player.pos)
                     enemy.lose_interest_timer = ENEMY_LOSE_INTEREST_TIME
 
-    def _handle_bullet_collisions(self):
+    def _handle_collisions(self):
+        """Фізичний менеджер колізій: обробка польоту куль, влучань, а також механіки ближнього бою ворогів (Pushback)"""
+
+        # --- МЕХАНІКА КОНТАКТНОГО БОЮ ШІ (ВЛУЧАННЯ ВПРИТУЛ) ---
+        for enemy in self.enemies:
+            if hasattr(enemy, "melee_cooldown") and enemy.melee_cooldown > 0:
+                enemy.melee_cooldown -= 1
+
+            if enemy.is_alerted and not self.player.is_hidden:
+                dist_to_player = enemy.pos.distance_to(self.player.pos)
+                # Якщо гравець підійшов занадто близько (менше 35 пікселів)
+                if dist_to_player <= 35:
+                    if getattr(enemy, "melee_cooldown", 0) == 0:
+                        # Наносимо невелику шкоду прикладом
+                        self.player.hp -= 10
+                        enemy.melee_cooldown = 60  # Кулдаун 1 секунда
+
+                        # Розрахунок вектору відштовхування (від ворога до гравця)
+                        push_dir = self.player.pos - enemy.pos
+                        if push_dir.length() > 0:
+                            push_dir = push_dir.normalize()
+                        else:
+                            push_dir = pygame.math.Vector2(1, 0)
+
+                        # Зміщення гравця силою поштовху
+                        old_pos = pygame.math.Vector2(self.player.pos)
+                        self.player.pos += push_dir * 45
+                        self.player.rect.center = (int(self.player.pos.x), int(self.player.pos.y))
+
+                        # Валідація стін після поштовху, щоб уникнути вильоту за текстури
+                        if pygame.sprite.spritecollideany(self.player, self.obstacles):
+                            self.player.pos = old_pos
+                            self.player.rect.center = (int(self.player.pos.x), int(self.player.pos.y))
+
+                        if self.player.hp <= 0:
+                            self.game_state = "GAME_OVER"
+                        print("Ворог штовхнув вас прикладом!")
+
+        # --- КЛАСИЧНА ОБРОБКА КУЛЬ ---
         for bullet in list(self.bullets):
             if pygame.sprite.spritecollideany(bullet, self.obstacles):
                 bullet.kill()
@@ -310,6 +366,10 @@ class Game:
                     if enemy.hp <= 0: enemy.kill()
 
     def update(self):
+        """Щокадрове оновлення станів ігрових об'єктів та обчислення логіки симуляції"""
+        # Оновлюємо стан кастомного прицілу (він сам знає, коли ховати мишу)
+        self.crosshair_ctrl.update(self.player, self.camera, self.knife_attack_radius, self.game_state)
+
         if self.game_state != "PLAYING":
             return
 
@@ -320,18 +380,24 @@ class Game:
         self.bullets.update()
         self.enemies.update(self.player, self.game_matrix, self.obstacles)
 
+        # Реєстрація снарядів, які випустив ШІ під час свого тику оновлення
         for enemy in self.enemies:
             if enemy.fired_bullet:
+                # Скасовуємо стрільбу ворога, якщо гравець підійшов у зону фізичного контакту (впритул)
+                if enemy.pos.distance_to(self.player.pos) <= 35:
+                    enemy.fired_bullet = None
+                    continue
                 self.bullets.add(enemy.fired_bullet)
                 self.all_sprites.add(enemy.fired_bullet)
 
         self._check_environmental_sounds()
-        self._handle_bullet_collisions()
+        self._handle_collisions()
 
         if len(self.enemies) == 0:
             self.game_state = "VICTORY"
 
     def draw(self):
+        """Глобальний рендеринг графічних шарів сцени та елементів користувацького інтерфейсу на екран"""
         if self.game_state == "MENU":
             self.screen.fill((15, 20, 30))
             title = self.pause_font_title.render("STEALTH ACTION", True, (0, 150, 255))
@@ -344,10 +410,11 @@ class Game:
 
         self.screen.fill(BG_COLOR)
 
+        # 1. Шар конусів зору ШІ (під об'єктами)
         for enemy in self.enemies:
             enemy.draw_vision_cone(self.screen, self.camera)
 
-        # Рендеринг ефектів (винесено розрахунки згасання)
+        # 2. Шар спалахів та візуальних ефектів зброї
         if self.gunshot_visual_timer > 0:
             draw_gunshot_flash(self.screen, self.camera, self.gunshot_visual_pos, self.gunshot_visual_radius,
                                self.gunshot_visual_timer)
@@ -357,18 +424,21 @@ class Game:
             draw_knife_swing(self.screen, self.camera, self.player, self.knife_attack_radius)
             if self.game_state == "PLAYING": self.knife_visual_timer -= 1
 
-        # Радіус кроків навколо гравця
+        # 3. Радіус звуку кроків навколо гравця
         if self.player.current_noise_radius > 0 and not self.player.is_hidden:
             noise_pos = (
-            int(self.player.pos.x + self.camera.camera_rect.x), int(self.player.pos.y + self.camera.camera_rect.y))
+                int(self.player.pos.x + self.camera.camera_rect.x),
+                int(self.player.pos.y + self.camera.camera_rect.y)
+            )
             color = (255, 100, 100) if self.player.current_noise_radius > 40 else (0, 150, 255)
             pygame.draw.circle(self.screen, color, noise_pos, int(self.player.current_noise_radius), 1)
 
-        # Рендеринг об'єктів сцени
+        # 4. Рендеринг фізичних об'єктів сцени та сутностей
         for sprite in self.all_sprites:
             if sprite == self.player and self.player.is_hidden: continue
             self.screen.blit(sprite.image, self.camera.apply(sprite))
 
+        # 5. Індикатори стану ворогів поверх їхніх текстур
         for enemy in self.enemies:
             enemy.draw_health_bar(self.screen, self.camera)
             enemy.draw_suspicion_bar(self.screen, self.camera)
@@ -376,17 +446,22 @@ class Game:
         for bullet in self.bullets:
             self.screen.blit(bullet.image, self.camera.apply(bullet))
 
-        # UI
+        # 6. Статичні панелі HUD та підказки UI
         draw_player_bars(self.screen, self.player, self.pause_font_btn)
         draw_game_ui(self.screen, self.player, self.enemies, pygame.key.get_pressed(), self.pause_font_btn)
 
         if self.game_state == "PLAYING":
             draw_controls_help(self.screen, self.pause_font_btn)
 
+        # 7. Шар кастомного прицілу (малюється поверх гри, але під модальними оверлеями)
+        if self.game_state == "PLAYING":
+            self.crosshair_ctrl.draw(self.screen, self.player)
+
+        # 8. Оверлей модальних меню паузи, перемоги чи смерті
         self._draw_overlay_menus()
 
     def _draw_overlay_menus(self):
-        """Рендеринг модальних вікон станів гри"""
+        """Рендеринг модальних контекстних вікон для відображення системних станів гри"""
         if self.game_state not in ["PAUSE", "GAME_OVER", "VICTORY"]: return
 
         menu_w, menu_h = 340, 380 if self.game_state == "PAUSE" else 260
@@ -408,6 +483,7 @@ class Game:
         for btn in buttons: btn.draw(self.screen)
 
     def run(self):
+        """Головний нескінченний цикл виконання додатку з фіксацією кадрової частоти (FPS)"""
         while self.running:
             self.handle_events()
             self.update()
