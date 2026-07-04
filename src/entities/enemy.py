@@ -1,12 +1,12 @@
+# src/entities/enemy.py
 import pygame
 import math
 import random
 from pathfinding.core.grid import Grid
 from pathfinding.finder.a_star import AStarFinder
-# ПЕРЕНЕСЕНО НАВЕРХ: Всі імпорти конфігів та об'єктів для оптимізації FPS
 from src.settings import (
     ENEMY_TYPES, TILE_SIZE, ENEMY_LOSE_INTEREST_TIME,
-    SCREEN_WIDTH, SCREEN_HEIGHT, WEAPONS
+    WEAPONS, WORLD_WIDTH, WORLD_HEIGHT
 )
 from src.objects.bullet import Bullet
 
@@ -48,8 +48,8 @@ class Enemy(pygame.sprite.Sprite):
         self.is_alerted = False
 
         self.suspicion = 0.0  # Рівень підозри від 0.0 до 1.0
-        self.suspicion_speed = 1.5  # Як швидко заповнюється (~0.6 секунди до тривоги)
-        self.cool_down_speed = 0.8  # Як швидко ворог заспокоюється, коли втратив нас
+        self.suspicion_speed = 1.5  # Як швидко заповнюється
+        self.cool_down_speed = 0.8  # Як швидко ворог заспокоюється
 
         # Стелс-таймери та координати погоні
         self.last_known_player_pos = None
@@ -78,14 +78,14 @@ class Enemy(pygame.sprite.Sprite):
         bar_x = (self.pos.x + camera.camera_rect.x) - bar_width // 2
         bar_y = (self.pos.y + camera.camera_rect.y) - 30
 
-        # 1. Малюємо смужку HP
+        # 1. Смужка HP
         pygame.draw.rect(screen, (80, 0, 0), pygame.Rect(bar_x, bar_y, bar_width, bar_height))
         hp_pct = max(0, self.hp / self.max_hp)
         current_hp_width = int(bar_width * hp_pct)
         if current_hp_width > 0:
             pygame.draw.rect(screen, (0, 255, 100), pygame.Rect(bar_x, bar_y, current_hp_width, bar_height))
 
-        # 2. Малюємо смужку броні
+        # 2. Смужка броні
         if self.max_armor > 0:
             armor_bar_height = 3
             armor_y = bar_y + bar_height + 1
@@ -105,7 +105,7 @@ class Enemy(pygame.sprite.Sprite):
         bar_height = 5
 
         bar_x = (self.pos.x + camera.camera_rect.x) - bar_width // 2
-        bar_y = (self.pos.y + camera.camera_rect.y) - 40  # На 10 пікселів вище ніж HP bar
+        bar_y = (self.pos.y + camera.camera_rect.y) - 40
 
         pygame.draw.rect(screen, (40, 40, 40), pygame.Rect(bar_x, bar_y, bar_width, bar_height))
 
@@ -122,12 +122,14 @@ class Enemy(pygame.sprite.Sprite):
         pygame.draw.rect(screen, (0, 0, 0), pygame.Rect(bar_x, bar_y, bar_width, bar_height), 1)
 
     def draw_vision_cone(self, screen, camera):
-        """Візуалізація сектору огляду ворога"""
+        """Візуалізація сектору огляду ворога з урахуванням великого світу та камери"""
         cone_color = (255, 0, 0, 40) if self.is_alerted else (0, 255, 0, 30)
 
-        vision_surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        screen_pos = self.pos + pygame.math.Vector2(camera.camera_rect.x, camera.camera_rect.y)
-        points = [screen_pos]
+        # ФІКС: Створюємо тимчасову поверхню під розмір ВСЬОГО світу
+        vision_surface = pygame.Surface((WORLD_WIDTH, WORLD_HEIGHT), pygame.SRCALPHA)
+
+        # Точки малюються в глобальних координатах світу
+        points = [self.pos]
 
         num_segments = 30
         _, current_angle = self.rotation_vector.as_polar()
@@ -136,16 +138,17 @@ class Enemy(pygame.sprite.Sprite):
         for i in range(num_segments + 1):
             angle = start_angle + (self.view_angle / num_segments) * i
             rad = math.radians(angle)
-            target_point = screen_pos + pygame.math.Vector2(math.cos(rad), math.sin(rad)) * self.view_radius
+            target_point = self.pos + pygame.math.Vector2(math.cos(rad), math.sin(rad)) * self.view_radius
             points.append(target_point)
 
         if len(points) >= 3:
             pygame.draw.polygon(vision_surface, cone_color, points)
 
-        screen.blit(vision_surface, (0, 0))
+        # Малюємо поверхню на екран із застосуванням зміщення камери
+        screen.blit(vision_surface, (camera.camera_rect.x, camera.camera_rect.y))
 
     def check_for_player(self, player, obstacles):
-        """Перевіряє, чи знаходиться гравець у конусі зору ворога і чи немає перешкод."""
+        """Перевіряє, чи знаходиться гравець у конусі зору ворога і чи немає перешкод (апгрейджений рейкаст)."""
         enemy_to_player = player.pos - self.pos
         distance = enemy_to_player.length()
 
@@ -165,16 +168,12 @@ class Enemy(pygame.sprite.Sprite):
         if angle_diff > self.view_angle / 2:
             return False
 
+        # Оптимізований та точний Line-of-Sight чек через clipline
         if distance > 0:
-            ray_dir = enemy_to_player.normalize()
-            step_size = 10
-            steps = int(distance / step_size)
-
-            for i in range(1, steps):
-                check_pos = self.pos + ray_dir * (i * step_size)
-                for obstacle in obstacles:
-                    if obstacle.rect.collidepoint(check_pos):
-                        return False
+            for obstacle in obstacles:
+                # Перевіряємо, чи перетинає лінія погляду прямокутник стіни
+                if obstacle.rect.clipline(self.pos.x, self.pos.y, player.pos.x, player.pos.y):
+                    return False
 
         return True
 
@@ -186,7 +185,7 @@ class Enemy(pygame.sprite.Sprite):
         grid_width = len(game_matrix[0])
 
         attempts = 0
-        while len(self.patrol_points) < 3 and attempts < 100:
+        while len(self.patrol_points) < 3 and attempts < 150:
             attempts += 1
             gx = random.randint(1, grid_width - 2)
             gy = random.randint(1, grid_height - 2)
@@ -194,29 +193,27 @@ class Enemy(pygame.sprite.Sprite):
                 pixel_x = gx * TILE_SIZE + TILE_SIZE // 2
                 pixel_y = gy * TILE_SIZE + TILE_SIZE // 2
                 new_pos = pygame.math.Vector2(pixel_x, pixel_y)
-                if all(p.distance_to(new_pos) > TILE_SIZE * 2 for p in self.patrol_points):
+                if all(p.distance_to(new_pos) > TILE_SIZE * 3 for p in self.patrol_points):
                     self.patrol_points.append(new_pos)
 
     def update(self, player, game_matrix, obstacles):
         self.fired_bullet = None
+        w_stats = WEAPONS[self.weapon]
 
-        # 1. Перевіряємо, чи бачить ворог гравця в цей момент
+        # 1. Перевіряємо, чи бачить ворог гравця
         can_see_player = self.check_for_player(player, obstacles)
 
-        # 2. Логіка індикатора підозри (Керування станом спокою/тривоги)
+        # 2. Логіка індикатора підозри та станів тривоги
         if not self.is_alerted:
-            # Ворог спокійний
             self.view_radius = self.base_view_radius
             self.view_angle = self.base_view_angle
-
-            # ФІКС: Замість хардкоду "rookie", тепер береться базова швидкість поточного типу ворога
-            self.speed = self.stats["speed"] * 0.6  # Наприклад, у патрулі ходять повільніше, ніж біжать при тривозі
+            self.speed = self.stats["speed"] * 0.6  # Патрульна швидкість
 
             if can_see_player:
                 self.suspicion += 0.025
                 if self.suspicion >= 1.0:
                     self.suspicion = 1.0
-                    self.is_alerted = True  # ПЕРЕХІД У РЕЖИМ ТРИВОГИ
+                    self.is_alerted = True
                     self.last_known_player_pos = pygame.math.Vector2(player.pos)
                     self.lose_interest_timer = ENEMY_LOSE_INTEREST_TIME
                     self.patrol_wait_timer = 0
@@ -226,7 +223,6 @@ class Enemy(pygame.sprite.Sprite):
                 if self.suspicion < 0:
                     self.suspicion = 0.0
         else:
-            # Ворог ВЖЕ у стані тривоги
             self.suspicion = 1.0
             self.view_radius = self.base_view_radius * 2.5
             self.view_angle = min(360, self.base_view_angle + 80)
@@ -238,7 +234,7 @@ class Enemy(pygame.sprite.Sprite):
                 self.patrol_wait_timer = 0
                 self.path = []
 
-        # 3. Визначаємо поведінку руху на основі стану тривоги
+        # 3. Визначаємо поведінку руху
         move_straight_to_player = False
         target_pos = None
 
@@ -283,17 +279,22 @@ class Enemy(pygame.sprite.Sprite):
                 self.shoot_cooldown -= 1
             else:
                 _, angle = direction.as_polar()
-                spread_val = 15 if self.type == "rookie" else 5
+                # Розраховуємо розліт на основі поточної зброї ворога (з settings.py)
+                spread_val = w_stats.get("spread", 5)
                 angle += random.uniform(-spread_val, spread_val)
 
-                w_stats = WEAPONS[self.weapon]
-                self.fired_bullet = Bullet(self.pos.x, self.pos.y, angle, w_stats["damage"], w_stats["bullet_speed"],
-                                           True)
-                self.shoot_cooldown = 45 if self.type == "rookie" else 15
+                self.fired_bullet = Bullet(
+                    self.pos.x, self.pos.y, angle,
+                    w_stats["damage"], w_stats["bullet_speed"], True
+                )
+                # ФІКС: Кулдаун береться безпосередньо з налаштувань конкретної зброї
+                self.shoot_cooldown = w_stats["shoot_cooldown"] // 16  # переводимо мс в кадри (~60fps)
 
         # Пошук шляху за алгоритмом A*
         elif target_pos:
-            self.shoot_cooldown = 0
+            if self.shoot_cooldown > 0:
+                self.shoot_cooldown -= 1
+
             self.path_update_timer -= 1
             max_grid_x = len(game_matrix[0]) - 1
             max_grid_y = len(game_matrix) - 1
@@ -307,7 +308,6 @@ class Enemy(pygame.sprite.Sprite):
                 self.path_update_timer = 15
                 grid = Grid(matrix=game_matrix)
 
-                # ФІКС: Безпечна перевірка точок на випадок зсувів об'єктів
                 if grid.walkable(start_x, start_y) and grid.walkable(end_x, end_y):
                     start_node = grid.node(start_x, start_y)
                     end_node = grid.node(end_x, end_y)

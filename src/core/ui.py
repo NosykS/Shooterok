@@ -1,7 +1,9 @@
+# src/core/ui.py
 import pygame
 from src.settings import SCREEN_WIDTH, SCREEN_HEIGHT, WHITE, WEAPONS
 
-# клас кнопок
+
+# Клас кнопок з анімацією
 class UIButton:
     def __init__(self, x, y, width, height, text, font, base_color, hover_color, action_value):
         self.text = text
@@ -51,7 +53,7 @@ class UIButton:
 
         # Малюємо саму кнопку
         pygame.draw.rect(screen, self.current_color, self.rect, border_radius=8)
-        # Біла рамка навколо кнопки
+        # Рамка навколо кнопки
         pygame.draw.rect(screen, (255, 255, 255), self.rect, width=2, border_radius=8)
 
         # Текст по центру кнопки
@@ -75,7 +77,7 @@ def draw_controls_help(screen, font_ui):
     for idx, line in enumerate(controls):
         color = (200, 200, 200) if idx > 0 else (255, 200, 50)
         txt = font_ui.render(line, True, color)
-        screen.blit(txt, (SCREEN_WIDTH - 290, start_y + idx * 22))  # Трохи посунули вліво, бо новий шрифт може бути ширшим
+        screen.blit(txt, (SCREEN_WIDTH - 290, start_y + idx * 22))
 
 
 def draw_player_bars(screen, player, font_small):
@@ -109,7 +111,8 @@ def draw_player_bars(screen, player, font_small):
     screen.blit(armor_text, (25, 44))
 
 
-def draw_game_ui(screen, player, enemies, keys, WEAPONS, font_small):
+def draw_game_ui(screen, player, enemies, keys, font_small):
+    """ФІКС: Прибрано дублюючий аргумент WEAPONS, додано загальний стелс-індикатор небезпеки"""
     weapon_name = player.current_weapon.upper()
     weapon_stats = WEAPONS[player.current_weapon]
 
@@ -122,8 +125,31 @@ def draw_game_ui(screen, player, enemies, keys, WEAPONS, font_small):
     if player.is_hidden:
         stealth_status = "HIDDEN"
 
+    # --- РОЗРАХУНОК ЗАГАЛЬНОГО СТАНУ ЗАГРОЗИ ---
+    max_suspicion = 0.0
+    any_alerted = False
+
+    for enemy in enemies:
+        if enemy.is_alerted:
+            any_alerted = True
+        if enemy.suspicion > max_suspicion:
+            max_suspicion = enemy.suspicion
+
+    if any_alerted:
+        threat_status = "ALERT"
+        threat_color = (255, 0, 0)
+    elif max_suspicion > 0:
+        threat_status = f"CAUTION ({int(max_suspicion * 100)}%)"
+        threat_color = (255, 165, 0)
+    else:
+        threat_status = "HIDDEN" if player.is_hidden else "CLEAR"
+        threat_color = (0, 255, 100)
+
+    # Виведення тексту інтерфейсу
     weapon_ui_text = font_small.render(f"WEAPON: {weapon_name}  [{ammo_str}]", True, (255, 200, 50))
     status_ui_text = font_small.render(f"MODE: {stealth_status}  |  ENEMIES LEFT: {len(enemies)}", True, WHITE)
+    threat_ui_text = font_small.render(f"THREAT LEVEL: {threat_status}", True, threat_color)
 
-    screen.blit(weapon_ui_text, (20, SCREEN_HEIGHT - 65))
-    screen.blit(status_ui_text, (20, SCREEN_HEIGHT - 35))
+    screen.blit(weapon_ui_text, (20, SCREEN_HEIGHT - 85))
+    screen.blit(status_ui_text, (20, SCREEN_HEIGHT - 55))
+    screen.blit(threat_ui_text, (20, SCREEN_HEIGHT - 25))

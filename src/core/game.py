@@ -1,3 +1,4 @@
+# src/core/game.py
 import pygame
 import random
 import math
@@ -34,7 +35,7 @@ class Game:
         self.hiding_spots = pygame.sprite.Group()
         self.game_matrix = None
 
-        # Ініціалізуємо камеру, передаючи повні піксельні розміри нашого великого світу
+        # Ініціалізуємо камеру під розміри великого світу
         self.camera = Camera(WORLD_WIDTH, WORLD_HEIGHT)
 
         # Пам'ять карти для перезапуску після смерті
@@ -55,69 +56,50 @@ class Game:
         self.pause_font_title = pygame.font.SysFont("Arial", 48, bold=True)
         self.pause_font_btn = pygame.font.SysFont("Arial", 22, bold=True)
 
-        # Спочатку запускаємо базове скидання гри (тепер після створення шрифтів)
+        # Запускаємо базове скидання гри
         self.reset_game(new_map=True)
 
         # Визначаємо центр екрана для вирівнювання кнопок
         cx = SCREEN_WIDTH // 2
         cy = SCREEN_HEIGHT // 2
 
-        # Колірна палітра: базовий темно-сірий та синьо-блакитний при наведенні
+        # Колірна палітра кнопок
         b_color = (40, 45, 55)
         h_color = (60, 80, 110)
-
-        # Червона палітра для небезпечних дій (виходу чи поразки)
         red_b_color = (120, 35, 35)
         red_h_color = (160, 45, 45)
-
-        # Зелена палітра для тріумфальних дій (перемоги)
         green_b_color = (35, 120, 65)
         green_h_color = (45, 160, 85)
 
-        # --- ІНІЦІАЛІЗАЦІЯ МЕНЮ ПАУЗИ ---
+        # --- ІНІЦІАЛІЗАЦІЯ КНОПОК МЕНЮ ---
         self.pause_buttons = [
-            UIButton(cx, cy - 90, 260, 45, "Продовжити", self.pause_font_btn, b_color,
-                     h_color, "CONTINUE"),
-            UIButton(cx, cy - 30, 260, 45, "Перезапустити рівень", self.pause_font_btn,
-                     b_color, h_color, "RESTART"),
-            UIButton(cx, cy + 30, 260, 45, "Головне меню", self.pause_font_btn, b_color,
-                     h_color, "MAIN_MENU"),
-            UIButton(cx, cy + 90, 260, 45, "Вийти з гри", self.pause_font_btn, red_b_color,
-                     red_h_color, "QUIT")
+            UIButton(cx, cy - 90, 260, 45, "Продовжити", self.pause_font_btn, b_color, h_color, "CONTINUE"),
+            UIButton(cx, cy - 30, 260, 45, "Перезапустити рівень", self.pause_font_btn, b_color, h_color, "RESTART"),
+            UIButton(cx, cy + 30, 260, 45, "Головне меню", self.pause_font_btn, b_color, h_color, "MAIN_MENU"),
+            UIButton(cx, cy + 90, 260, 45, "Вийти з гри", self.pause_font_btn, red_b_color, red_h_color, "QUIT")
         ]
 
-        # --- КНОПКИ ГОЛОВНОГО МЕНЮ ---
         self.main_menu_buttons = [
-            UIButton(cx, cy - 30, 260, 45, "СТАРТ", self.pause_font_btn, b_color,
-                     h_color, "START"),
-            UIButton(cx, cy + 30, 260, 45, "ВИХІД", self.pause_font_btn, red_b_color,
-                     red_h_color, "QUIT")
+            UIButton(cx, cy - 30, 260, 45, "СТАРТ", self.pause_font_btn, b_color, h_color, "START"),
+            UIButton(cx, cy + 30, 260, 45, "ВИХІД", self.pause_font_btn, red_b_color, red_h_color, "QUIT")
         ]
 
-        # --- КНОПКИ ЕКРАНУ ПОРАЗКИ ---
         self.game_over_buttons = [
-            UIButton(cx, cy + 20, 260, 45, "СПРОБУВАТИ ЗНОВУ", self.pause_font_btn, b_color,
-                     h_color, "RESTART"),
-            UIButton(cx, cy + 80, 260, 45, "ГОЛОВНЕ МЕНЮ", self.pause_font_btn, b_color,
-                     h_color, "MAIN_MENU")
+            UIButton(cx, cy + 20, 260, 45, "СПРОБУВАТИ ЗНОВУ", self.pause_font_btn, b_color, h_color, "RESTART"),
+            UIButton(cx, cy + 80, 260, 45, "ГОЛОВНЕ МЕНЮ", self.pause_font_btn, b_color, h_color, "MAIN_MENU")
         ]
 
-        # --- КНОПКИ ЕКРАНУ ПЕРЕМОГИ ---
         self.victory_buttons = [
-            UIButton(cx, cy + 20, 260, 45, "ГРАТИ ЗНОВУ", self.pause_font_btn, green_b_color,
-                     green_h_color, "RESTART"),
-            UIButton(cx, cy + 80, 260, 45, "ГОЛОВНЕ МЕНЮ", self.pause_font_btn, b_color,
-                     h_color, "MAIN_MENU")
+            UIButton(cx, cy + 20, 260, 45, "ГРАТИ ЗНОВУ", self.pause_font_btn, green_b_color, green_h_color, "RESTART"),
+            UIButton(cx, cy + 80, 260, 45, "ГОЛОВНЕ МЕНЮ", self.pause_font_btn, b_color, h_color, "MAIN_MENU")
         ]
 
     def reset_game(self, new_map=True, new_level=False):
         self.player = Player(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
 
-        # Скидання візуальних таймерів ефектів, щоб вони не зависали при перезапуску
         self.gunshot_visual_timer = 0
         self.knife_visual_timer = 0
 
-        # Очищення сцени та груп спрайтів
         for sprite in self.all_sprites:
             sprite.kill()
 
@@ -127,7 +109,6 @@ class Game:
         self.obstacles = pygame.sprite.Group()
         self.hiding_spots = pygame.sprite.Group()
 
-        # Делегуємо генерацію карти
         if new_map or self.saved_game_matrix is None:
             self.game_matrix, self.saved_hiding_spots_data = MapGenerator.generate_level(self.player.pos)
             self.saved_game_matrix = [row[:] for row in self.game_matrix]
@@ -142,18 +123,14 @@ class Game:
                     self.obstacles.add(wall)
                     self.all_sprites.add(wall)
 
-        # Ініціалізація кущів
+        # Ініціалізація кущів/схованок
         for pos_x, pos_y in self.saved_hiding_spots_data:
             spot = HidingSpot(pos_x, pos_y, TILE_SIZE, TILE_SIZE)
             self.hiding_spots.add(spot)
             self.all_sprites.add(spot)
 
         # Спавн ворогів
-        if new_level:
-            num_enemies = random.randint(4, 6)
-        else:
-            num_enemies = random.randint(2, 4)
-
+        num_enemies = random.randint(4, 6) if new_level else random.randint(2, 4)
         spawn_positions = MapGenerator.get_enemy_spawn_positions(
             self.game_matrix, self.saved_hiding_spots_data, self.player.pos, count=num_enemies
         )
@@ -225,7 +202,7 @@ class Game:
                                 self.player.is_hidden = True
                                 self.player.pos = pygame.math.Vector2(hit_spot.rect.center)
 
-        # Обрахунок взаємодії з кнопками UI
+        # Оновлення кнопок інтерфейсу
         if self.game_state == "MENU":
             for btn in self.main_menu_buttons:
                 action = btn.update(mouse_pos, mouse_click)
@@ -301,12 +278,6 @@ class Game:
                     enemy.last_known_player_pos = pygame.math.Vector2(self.player.pos)
                     enemy.lose_interest_timer = ENEMY_LOSE_INTEREST_TIME
 
-                    for other_enemy in self.enemies:
-                        if other_enemy != enemy and not other_enemy.is_alerted:
-                            if other_enemy.check_for_player(self.player, self.obstacles):
-                                other_enemy.is_alerted = True
-                                other_enemy.last_known_player_pos = pygame.math.Vector2(self.player.pos)
-                                other_enemy.lose_interest_timer = ENEMY_LOSE_INTEREST_TIME
                     if enemy.hp <= 0:
                         enemy.kill()
 
@@ -315,10 +286,9 @@ class Game:
             return
 
         keys = pygame.key.get_pressed()
-        is_moving = keys[pygame.K_w] or keys[pygame.K_s] or keys[pygame.K_a] or keys[pygame.K_d]
-
         self.player.update(keys, self.obstacles, self.camera)
 
+        # Обробка атаки
         mouse_buttons = pygame.mouse.get_pressed()
         if mouse_buttons[0]:
             attack_result = self.player.attack(self.camera)
@@ -329,35 +299,30 @@ class Game:
                 self.all_sprites.add(attack_result)
                 self.bullets.add(attack_result)
 
+                # Задаємо таймер для візуального відображення спалаху пострілу
                 weapon_stats = WEAPONS[self.player.current_weapon]
-                noise_rad = weapon_stats["noise_radius"]
-
-                if noise_rad > 0 and not getattr(self.player, "is_hidden", False):
-                    for enemy in self.enemies:
-                        if enemy.pos.distance_to(self.player.pos) < noise_rad:
-                            enemy.is_alerted = True
-                            enemy.last_known_player_pos = pygame.math.Vector2(self.player.pos)
-                            enemy.lose_interest_timer = ENEMY_LOSE_INTEREST_TIME
-
-                    self.gunshot_visual_timer = 10
-                    self.gunshot_visual_pos = (int(self.player.pos.x), int(self.player.pos.y))
-                    self.gunshot_visual_radius = noise_rad
+                self.gunshot_visual_timer = 8
+                self.gunshot_visual_pos = (int(self.player.pos.x), int(self.player.pos.y))
+                self.gunshot_visual_radius = weapon_stats["noise_radius"]
 
         self.bullets.update()
         self.enemies.update(self.player, self.game_matrix, self.obstacles)
 
+        # Збір куль, випущених ворогами
         for enemy in self.enemies:
             if enemy.fired_bullet:
                 self.bullets.add(enemy.fired_bullet)
                 self.all_sprites.add(enemy.fired_bullet)
 
-        if is_moving and self.player.current_noise_radius > 0 and not self.player.is_hidden:
+        # ФІКС: Єдина та точна перевірка слуху ворогів (для кроків та пострілів)
+        if self.player.current_noise_radius > 0 and not self.player.is_hidden:
             for enemy in self.enemies:
                 if enemy.pos.distance_to(self.player.pos) <= self.player.current_noise_radius:
                     enemy.is_alerted = True
                     enemy.last_known_player_pos = pygame.math.Vector2(self.player.pos)
                     enemy.lose_interest_timer = ENEMY_LOSE_INTEREST_TIME
 
+        # Обробка колізій куль
         for bullet in list(self.bullets):
             if pygame.sprite.spritecollideany(bullet, self.obstacles):
                 bullet.kill()
@@ -377,8 +342,6 @@ class Game:
                                 self.player.armor = 0
 
                         self.player.hp -= damage_to_deal
-                        print(f"Гравець поранений! HP: {self.player.hp} | Броня: {self.player.armor}")
-
                         if self.player.hp <= 0:
                             self.game_state = "GAME_OVER"
                     bullet.kill()
@@ -422,15 +385,16 @@ class Game:
 
             self.screen.fill(BG_COLOR)
 
+            # Візуалізація конусів зору ворогів
             for enemy in self.enemies:
                 enemy.draw_vision_cone(self.screen, self.camera)
 
+            # Візуалізація спалаху від пострілу (динамічне згасання)
             if self.gunshot_visual_timer > 0:
-                s = pygame.Surface((self.gunshot_visual_radius * 2, self.gunshot_visual_radius * 2),
-                                   pygame.SRCALPHA)
-                pygame.draw.circle(s, (100, 200, 255, 120), (self.gunshot_visual_radius,
-                                                             self.gunshot_visual_radius),
-                                   self.gunshot_visual_radius, 4)
+                s = pygame.Surface((self.gunshot_visual_radius * 2, self.gunshot_visual_radius * 2), pygame.SRCALPHA)
+                alpha = int((self.gunshot_visual_timer / 8) * 140)  # Плавне прозоре згасання
+                pygame.draw.circle(s, (100, 200, 255, alpha), (self.gunshot_visual_radius, self.gunshot_visual_radius),
+                                   self.gunshot_visual_radius, 3)
 
                 flash_x = self.gunshot_visual_pos[0] - self.gunshot_visual_radius + self.camera.camera_rect.x
                 flash_y = self.gunshot_visual_pos[1] - self.gunshot_visual_radius + self.camera.camera_rect.y
@@ -438,6 +402,7 @@ class Game:
                 if self.game_state == "PLAYING":
                     self.gunshot_visual_timer -= 1
 
+            # Візуалізація атаки ножем
             if self.knife_visual_timer > 0:
                 mouse_pos = pygame.mouse.get_pos()
                 world_mouse = pygame.math.Vector2(mouse_pos[0] - self.camera.camera_rect.x,
@@ -456,27 +421,26 @@ class Game:
                 for i in range(num_segments + 1):
                     ang = start_angle + (view_angle / num_segments) * i
                     rad = math.radians(ang)
-                    world_point = self.player.pos + pygame.math.Vector2(math.cos(rad),
-                                                                        math.sin(rad)) * self.knife_attack_radius
+                    world_point = self.player.pos + pygame.math.Vector2(math.cos(rad), math.sin(rad)) * self.knife_attack_radius
                     points.append(world_point + pygame.math.Vector2(self.camera.camera_rect.topleft))
 
                 if len(points) >= 3:
-                    pygame.draw.polygon(knife_surf, (255, 50, 50, 50), points)
-                    pygame.draw.lines(knife_surf, (255, 100, 100, 180), False, points[1:], 2)
+                    pygame.draw.polygon(knife_surf, (255, 50, 50, 40), points)
+                    pygame.draw.lines(knife_surf, (255, 100, 100, 150), False, points[1:], 2)
 
                 self.screen.blit(knife_surf, (0, 0))
                 if self.game_state == "PLAYING":
                     self.knife_visual_timer -= 1
 
-            keys = pygame.key.get_pressed()
-            is_moving = keys[pygame.K_w] or keys[pygame.K_s] or keys[pygame.K_a] or keys[pygame.K_d]
-
-            if is_moving and self.player.current_noise_radius > 0 and not self.player.is_hidden:
+            # Візуалізація поточного радіуса шуму гравця (постріли або біг)
+            if self.player.current_noise_radius > 0 and not self.player.is_hidden:
                 noise_x = int(self.player.pos.x + self.camera.camera_rect.x)
                 noise_y = int(self.player.pos.y + self.camera.camera_rect.y)
-                pygame.draw.circle(self.screen, (0, 150, 255), (noise_x, noise_y),
-                                   self.player.current_noise_radius, 1)
+                # Колір змінюється залежно від інтенсивності шуму
+                color = (255, 100, 100) if self.player.current_noise_radius > 40 else (0, 150, 255)
+                pygame.draw.circle(self.screen, color, (noise_x, noise_y), int(self.player.current_noise_radius), 1)
 
+            # Малюємо всі статичні об'єкти та ворогів
             for sprite in self.all_sprites:
                 if sprite == self.player and self.player.is_hidden:
                     continue
@@ -489,18 +453,18 @@ class Game:
             for bullet in self.bullets:
                 self.screen.blit(bullet.image, self.camera.apply(bullet))
 
-            # --- МАЛЮВАННЯ ІНТЕРФЕЙСУ (ФІКС: Використовуємо існуючий self.pause_font_btn) ---
+            # --- МАЛЮВАННЯ ІНТЕРФЕЙСУ (ФІКС: Прибрано зайвий аргумент WEAPONS) ---
             draw_player_bars(self.screen, self.player, self.pause_font_btn)
-            draw_game_ui(self.screen, self.player, self.enemies, keys, WEAPONS, self.pause_font_btn)
+            draw_game_ui(self.screen, self.player, self.enemies, pygame.key.get_pressed(), self.pause_font_btn)
 
             if self.game_state == "PLAYING":
                 draw_controls_help(self.screen, self.pause_font_btn)
 
+            # Екрани станів (Пауза, Програш, Перемога)
             if self.game_state == "PAUSE":
                 menu_width, menu_height = 340, 380
                 menu_rect = pygame.Rect(SCREEN_WIDTH // 2 - menu_width // 2, SCREEN_HEIGHT // 2 - menu_height // 2,
                                         menu_width, menu_height)
-
                 pygame.draw.rect(self.screen, (25, 30, 40), menu_rect, border_radius=12)
                 pygame.draw.rect(self.screen, (0, 150, 255), menu_rect, width=2, border_radius=12)
 
@@ -515,7 +479,6 @@ class Game:
                 menu_width, menu_height = 340, 260
                 menu_rect = pygame.Rect(SCREEN_WIDTH // 2 - menu_width // 2, SCREEN_HEIGHT // 2 - menu_height // 2,
                                         menu_width, menu_height)
-
                 pygame.draw.rect(self.screen, (30, 20, 20), menu_rect, border_radius=12)
                 pygame.draw.rect(self.screen, (255, 50, 50), menu_rect, width=2, border_radius=12)
 
@@ -530,7 +493,6 @@ class Game:
                 menu_width, menu_height = 340, 260
                 menu_rect = pygame.Rect(SCREEN_WIDTH // 2 - menu_width // 2, SCREEN_HEIGHT // 2 - menu_height // 2,
                                         menu_width, menu_height)
-
                 pygame.draw.rect(self.screen, (20, 35, 25), menu_rect, border_radius=12)
                 pygame.draw.rect(self.screen, (50, 255, 100), menu_rect, width=2, border_radius=12)
 
@@ -545,6 +507,6 @@ class Game:
         while self.running:
             self.handle_events()
             self.update()
-            self.draw()  # Всередині draw вже немає display.flip()
-            pygame.display.flip()  # Єдиний правильний оновлювач екрана тут
+            self.draw()
+            pygame.display.flip()
             self.clock.tick(FPS)

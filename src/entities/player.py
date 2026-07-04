@@ -1,6 +1,6 @@
+# src/entities/player.py
 import pygame
 import random
-# Імпортуємо нові параметри великого світу замість екрану
 from src.settings import (
     WORLD_WIDTH, WORLD_HEIGHT, WEAPONS, PLAYER_SPEED_NORMAL,
     PLAYER_SPEED_STEALTH, PLAYER_NOISE_NORMAL, PLAYER_NOISE_STEALTH
@@ -27,13 +27,13 @@ class Player(pygame.sprite.Sprite):
 
         # Стелс характеристики
         self.speed = PLAYER_SPEED_NORMAL
-        self.current_noise_radius = PLAYER_NOISE_NORMAL
+        self.current_noise_radius = 0  # Починаємо з нуля, шум генерується діями
         self.is_hidden = False  # Чи сховався в кущах/шафі
 
         self.weapons = ["knife", "pistol_silenced", "rifle"]
         self.current_weapon_index = 1
 
-        # ФІКС: Ініціалізуємо запас набоїв для кожної вогнепальної зброї на максимум з конфігу settings
+        # Запас набоїв з конфігу settings
         self.weapons_ammo = {
             "knife": 0,
             "pistol_silenced": WEAPONS["pistol_silenced"]["ammo_capacity"],
@@ -53,27 +53,26 @@ class Player(pygame.sprite.Sprite):
     def current_weapon(self):
         return self.weapons[self.current_weapon_index]
 
-    # ДИНАМІЧНА ВЛАСТИВІСТЬ: Повертає набої для поточної обраної зброї, щоб ui.py (player.ammo) працював без переробок
     @property
     def ammo(self):
         return self.weapons_ammo[self.current_weapon]
 
-    # Сетер для ammo (про всяк випадок, якщо UI захоче напряму модифікувати значення)
     @ammo.setter
     def ammo(self, value):
         self.weapons_ammo[self.current_weapon] = value
 
     def handle_movement(self, keys, obstacles):
         if self.is_hidden:
-            return  # Якщо сховався — рухатися не можна, поки не вийдеш
+            self.current_noise_radius = 0
+            return
 
-        # Перевірка на стелс-ходьбу (затиснутий Shift)
+        # Базове визначення шуму від руху
         if keys[pygame.K_LSHIFT]:
             self.speed = PLAYER_SPEED_STEALTH
-            self.current_noise_radius = PLAYER_NOISE_STEALTH
+            base_noise = PLAYER_NOISE_STEALTH
         else:
             self.speed = PLAYER_SPEED_NORMAL
-            self.current_noise_radius = PLAYER_NOISE_NORMAL
+            base_noise = PLAYER_NOISE_NORMAL
 
         dx, dy = 0, 0
         if keys[pygame.K_w] or keys[pygame.K_UP]: dy = -self.speed
@@ -85,7 +84,14 @@ class Player(pygame.sprite.Sprite):
             dx *= 0.7071
             dy *= 0.7071
 
-        # Рух X
+        # Якщо гравець рухається — присвоюємо шум руху, якщо стоїть — 0
+        # (Але не перебиваємо шум від пострілу, який ставиться в attack())
+        if dx == 0 and dy == 0:
+            self.current_noise_radius = max(0, self.current_noise_radius - 2) # Плавне згасання спалаху шуму
+        else:
+            self.current_noise_radius = max(base_noise, self.current_noise_radius - 1)
+
+        # Рух X з колізіями
         self.pos.x += dx
         self.hitbox.centerx = self.pos.x
         for obstacle in obstacles:
@@ -94,7 +100,7 @@ class Player(pygame.sprite.Sprite):
                 if dx < 0: self.hitbox.left = obstacle.rect.right
                 self.pos.x = self.hitbox.centerx
 
-        # Рух Y
+        # Рух Y з колізіями
         self.pos.y += dy
         self.hitbox.centery = self.pos.y
         for obstacle in obstacles:
@@ -103,7 +109,7 @@ class Player(pygame.sprite.Sprite):
                 if dy < 0: self.hitbox.top = obstacle.rect.bottom
                 self.pos.y = self.hitbox.centery
 
-        # ЗМІНЕНО: Обмеження тепер діють на весь ВЕЛИКИЙ СВІТ, а не лише екран
+        # Обмеження під великий світ
         if self.pos.x < 0: self.pos.x = 0
         if self.pos.x > WORLD_WIDTH: self.pos.x = WORLD_WIDTH
         if self.pos.y < 0: self.pos.y = 0
@@ -111,32 +117,25 @@ class Player(pygame.sprite.Sprite):
 
         self.hitbox.center = self.pos
 
-        # Якщо гравець не рухається, він не створює шуму кроками
-        if dx == 0 and dy == 0:
-            self.current_noise_radius = 0
-
     def rotate_to_mouse(self, camera):
-        """ЗМІНЕНО: тепер метод приймає об'єкт камери, щоб коригувати позицію миші"""
         if self.is_hidden: return
 
-        # Переводимо координати миші з екрану у великий світ
         mouse_x, mouse_y = pygame.mouse.get_pos()
         world_mouse_x = mouse_x - camera.camera_rect.x
         world_mouse_y = mouse_y - camera.camera_rect.y
 
         direction = pygame.math.Vector2(world_mouse_x - self.pos.x, world_mouse_y - self.pos.y)
-        _, angle = direction.as_polar()
-        angle = -angle
-        self.image = pygame.transform.rotate(self.base_image, angle)
-        self.rect = self.image.get_rect(center=self.pos)
+        if direction.length() > 0:
+            _, angle = direction.as_polar()
+            angle = -angle
+            self.image = pygame.transform.rotate(self.base_image, angle)
+            self.rect = self.image.get_rect(center=self.pos)
 
     def change_weapon(self, index):
         if 0 <= index < len(self.weapons):
             self.current_weapon_index = index
-            print(f"Зброя змінена на: {self.weapons[index]} (Набої: {self.ammo})")
 
     def attack(self, camera):
-        """ЗМІНЕНО: метод приймає камеру для точного розрахунку вектору польоту кулі"""
         if self.is_hidden:
             return None
 
@@ -150,15 +149,18 @@ class Player(pygame.sprite.Sprite):
         # 2. Обробка атаки ближнього бою
         if self.current_weapon == "knife":
             self.last_shot_time = current_time
+            # Ніж теж видає мікро-шум при змаху
+            self.current_noise_radius = weapon_stats.get("noise_radius", 15)
             return "melee"
 
-        # 3. ФІКС: Перевірка наявності набоїв для вогнепальної зброї
+        # 3. Перевірка наявності набоїв
         if self.weapons_ammo[self.current_weapon] <= 0:
             return None
 
-        # Витрачаємо один набій
+        # Витрачаємо один набій та встановлюємо спалах шуму з конфігу зброї!
         self.weapons_ammo[self.current_weapon] -= 1
         self.last_shot_time = current_time
+        self.current_noise_radius = weapon_stats["noise_radius"]
 
         # Коригуємо мишу під координати світу
         mouse_x, mouse_y = pygame.mouse.get_pos()
@@ -168,7 +170,6 @@ class Player(pygame.sprite.Sprite):
 
         if dir_vector.length() > 0:
             _, angle = dir_vector.as_polar()
-
             angle += random.uniform(-weapon_stats["spread"], weapon_stats["spread"])
 
             return Bullet(
@@ -183,6 +184,5 @@ class Player(pygame.sprite.Sprite):
         return None
 
     def update(self, keys, obstacles, camera):
-        """ЗМІНЕНО: передаємо камеру всередину update"""
         self.handle_movement(keys, obstacles)
         self.rotate_to_mouse(camera)
