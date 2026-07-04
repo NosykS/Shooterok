@@ -1,5 +1,6 @@
 # src/core/ui.py
 import pygame
+import math
 from src.settings import SCREEN_WIDTH, SCREEN_HEIGHT, WHITE, WEAPONS
 
 
@@ -153,3 +154,45 @@ def draw_game_ui(screen, player, enemies, keys, font_small):
     screen.blit(weapon_ui_text, (20, SCREEN_HEIGHT - 85))
     screen.blit(status_ui_text, (20, SCREEN_HEIGHT - 55))
     screen.blit(threat_ui_text, (20, SCREEN_HEIGHT - 25))
+
+def draw_gunshot_flash(screen, camera, position, radius, timer):
+    """Малює спалах згасаючого звукового/візуального шуму пострілу"""
+    s = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+    alpha = int((timer / 8) * 140)  # Обчислення прозорості
+    pygame.draw.circle(s, (100, 200, 255, alpha), (radius, radius), radius, 3)
+
+    flash_x = position[0] - radius + camera.camera_rect.x
+    flash_y = position[1] - radius + camera.camera_rect.y
+    screen.blit(s, (flash_x, flash_y))
+
+
+def draw_knife_swing(screen, camera, player, attack_radius):
+    """Розраховує та малює конус атаки бойовим ножем відповідно до миші"""
+    mouse_pos = pygame.mouse.get_pos()
+    world_mouse = pygame.math.Vector2(
+        mouse_pos[0] - camera.camera_rect.x,
+        mouse_pos[1] - camera.camera_rect.y
+    )
+
+    player_to_mouse = world_mouse - player.pos
+    player_angle = player_to_mouse.as_polar()[1] if player_to_mouse.length() > 0 else 0
+
+    knife_surf = pygame.Surface((screen.get_width(), screen.get_height()), pygame.SRCALPHA)
+    player_screen_pos = player.pos + pygame.math.Vector2(camera.camera_rect.topleft)
+
+    points = [player_screen_pos]
+    num_segments = 16
+    view_angle = 90
+    start_angle = player_angle - view_angle / 2
+
+    for i in range(num_segments + 1):
+        ang = start_angle + (view_angle / num_segments) * i
+        rad = math.radians(ang)
+        world_point = player.pos + pygame.math.Vector2(math.cos(rad), math.sin(rad)) * attack_radius
+        points.append(world_point + pygame.math.Vector2(camera.camera_rect.topleft))
+
+    if len(points) >= 3:
+        pygame.draw.polygon(knife_surf, (255, 50, 50, 40), points)
+        pygame.draw.lines(knife_surf, (255, 100, 100, 150), False, points[1:], 2)
+
+    screen.blit(knife_surf, (0, 0))
