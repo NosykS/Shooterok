@@ -1,8 +1,10 @@
-# src/entities/player.py
 import pygame
+import random
 # Імпортуємо нові параметри великого світу замість екрану
-from src.settings import WORLD_WIDTH, WORLD_HEIGHT, WEAPONS, PLAYER_SPEED_NORMAL, PLAYER_SPEED_STEALTH, \
-    PLAYER_NOISE_NORMAL, PLAYER_NOISE_STEALTH
+from src.settings import (
+    WORLD_WIDTH, WORLD_HEIGHT, WEAPONS, PLAYER_SPEED_NORMAL,
+    PLAYER_SPEED_STEALTH, PLAYER_NOISE_NORMAL, PLAYER_NOISE_STEALTH
+)
 from src.objects.bullet import Bullet
 
 
@@ -31,6 +33,13 @@ class Player(pygame.sprite.Sprite):
         self.weapons = ["knife", "pistol_silenced", "rifle"]
         self.current_weapon_index = 1
 
+        # ФІКС: Ініціалізуємо запас набоїв для кожної вогнепальної зброї на максимум з конфігу settings
+        self.weapons_ammo = {
+            "knife": 0,
+            "pistol_silenced": WEAPONS["pistol_silenced"]["ammo_capacity"],
+            "rifle": WEAPONS["rifle"]["ammo_capacity"]
+        }
+
         # Зберігаємо точний час останнього пострілу/атаки в мілісекундах
         self.last_shot_time = 0
 
@@ -43,6 +52,16 @@ class Player(pygame.sprite.Sprite):
     @property
     def current_weapon(self):
         return self.weapons[self.current_weapon_index]
+
+    # ДИНАМІЧНА ВЛАСТИВІСТЬ: Повертає набої для поточної обраної зброї, щоб ui.py (player.ammo) працював без переробок
+    @property
+    def ammo(self):
+        return self.weapons_ammo[self.current_weapon]
+
+    # Сетер для ammo (про всяк випадок, якщо UI захоче напряму модифікувати значення)
+    @ammo.setter
+    def ammo(self, value):
+        self.weapons_ammo[self.current_weapon] = value
 
     def handle_movement(self, keys, obstacles):
         if self.is_hidden:
@@ -114,7 +133,7 @@ class Player(pygame.sprite.Sprite):
     def change_weapon(self, index):
         if 0 <= index < len(self.weapons):
             self.current_weapon_index = index
-            print(f"Зброя змінена на: {self.weapons[index]}")
+            print(f"Зброя змінена на: {self.weapons[index]} (Набої: {self.ammo})")
 
     def attack(self, camera):
         """ЗМІНЕНО: метод приймає камеру для точного розрахунку вектору польоту кулі"""
@@ -124,13 +143,22 @@ class Player(pygame.sprite.Sprite):
         current_time = pygame.time.get_ticks()
         weapon_stats = WEAPONS[self.current_weapon]
 
+        # 1. Перевірка кулдауну
         if current_time - self.last_shot_time < weapon_stats["shoot_cooldown"]:
             return None
 
-        self.last_shot_time = current_time
-
+        # 2. Обробка атаки ближнього бою
         if self.current_weapon == "knife":
+            self.last_shot_time = current_time
             return "melee"
+
+        # 3. ФІКС: Перевірка наявності набоїв для вогнепальної зброї
+        if self.weapons_ammo[self.current_weapon] <= 0:
+            return None
+
+        # Витрачаємо один набій
+        self.weapons_ammo[self.current_weapon] -= 1
+        self.last_shot_time = current_time
 
         # Коригуємо мишу під координати світу
         mouse_x, mouse_y = pygame.mouse.get_pos()
@@ -141,7 +169,6 @@ class Player(pygame.sprite.Sprite):
         if dir_vector.length() > 0:
             _, angle = dir_vector.as_polar()
 
-            import random
             angle += random.uniform(-weapon_stats["spread"], weapon_stats["spread"])
 
             return Bullet(

@@ -1,10 +1,14 @@
-# src/entities/enemy.py
 import pygame
 import math
 import random
 from pathfinding.core.grid import Grid
 from pathfinding.finder.a_star import AStarFinder
-from src.settings import ENEMY_TYPES, TILE_SIZE, ENEMY_LOSE_INTEREST_TIME
+# ПЕРЕНЕСЕНО НАВЕРХ: Всі імпорти конфігів та об'єктів для оптимізації FPS
+from src.settings import (
+    ENEMY_TYPES, TILE_SIZE, ENEMY_LOSE_INTEREST_TIME,
+    SCREEN_WIDTH, SCREEN_HEIGHT, WEAPONS
+)
+from src.objects.bullet import Bullet
 
 
 class Enemy(pygame.sprite.Sprite):
@@ -44,7 +48,7 @@ class Enemy(pygame.sprite.Sprite):
         self.is_alerted = False
 
         self.suspicion = 0.0  # Рівень підозри від 0.0 до 1.0
-        self.suspicion_speed = 1.5  # Як швидко заповнюється (1.5 означає ~0.6 секунди до тривоги)
+        self.suspicion_speed = 1.5  # Як швидко заповнюється (~0.6 секунди до тривоги)
         self.cool_down_speed = 0.8  # Як швидко ворог заспокоюється, коли втратив нас
 
         # Стелс-таймери та координати погоні
@@ -63,27 +67,25 @@ class Enemy(pygame.sprite.Sprite):
 
         self.fired_bullet = None
 
-    # ФІКС ВІДСТУПІВ: Тепер метод знаходиться на рівні класу, як і має бути!
     def draw_health_bar(self, screen, camera):
-        """ФІКС: Змінено знак мінуса на плюс для правильного позиціонування камери"""
+        """Відображення здоров'я та броні ворога на екрані з урахуванням зміщення камери"""
         if self.hp <= 0:
             return
 
         bar_width = 40
         bar_height = 4
 
-        # ФІКС: додаємо координати камери, оскільки значення camera_rect від'ємні
         bar_x = (self.pos.x + camera.camera_rect.x) - bar_width // 2
         bar_y = (self.pos.y + camera.camera_rect.y) - 30
 
-        # 1. МАЛЮЄМО СМУЖКУ HP
+        # 1. Малюємо смужку HP
         pygame.draw.rect(screen, (80, 0, 0), pygame.Rect(bar_x, bar_y, bar_width, bar_height))
         hp_pct = max(0, self.hp / self.max_hp)
         current_hp_width = int(bar_width * hp_pct)
         if current_hp_width > 0:
             pygame.draw.rect(screen, (0, 255, 100), pygame.Rect(bar_x, bar_y, current_hp_width, bar_height))
 
-        # 2. МАЛЮЄМО СМУЖКУ БРОНІ
+        # 2. Малюємо смужку броні
         if self.max_armor > 0:
             armor_bar_height = 3
             armor_y = bar_y + bar_height + 1
@@ -96,42 +98,34 @@ class Enemy(pygame.sprite.Sprite):
 
     def draw_suspicion_bar(self, screen, camera):
         """Малює індикатор підозри над головою ворога під час засікання"""
-        # Малюємо лише тоді, коли є підозра, але ворог ще не почав повноцінну погоню
         if self.suspicion <= 0 or self.is_alerted:
             return
 
         bar_width = 40
         bar_height = 5
 
-        # Розрахунок позиції з урахуванням камери (малюємо трохи вище смужки HP)
         bar_x = (self.pos.x + camera.camera_rect.x) - bar_width // 2
         bar_y = (self.pos.y + camera.camera_rect.y) - 40  # На 10 пікселів вище ніж HP bar
 
-        # Фон індикатора (темно-сірий)
         pygame.draw.rect(screen, (40, 40, 40), pygame.Rect(bar_x, bar_y, bar_width, bar_height))
 
-        # Колір плавно переходить від чисто жовтого до червоного залежно від шкали
+        # Градієнт кольору: від жовтого до червоного
         red = 255
         green = int(220 * (1.0 - self.suspicion))
         blue = 0
         color = (red, green, blue)
 
-        # Ширина заповнення
         current_fill_width = int(bar_width * self.suspicion)
         if current_fill_width > 0:
             pygame.draw.rect(screen, color, pygame.Rect(bar_x, bar_y, current_fill_width, bar_height))
 
-        # Тонка чорна рамка для краси
         pygame.draw.rect(screen, (0, 0, 0), pygame.Rect(bar_x, bar_y, bar_width, bar_height), 1)
 
     def draw_vision_cone(self, screen, camera):
-        """ФІКС: Змінено знак мінуса на плюс для точного накладання конуса зору"""
+        """Візуалізація сектору огляду ворога"""
         cone_color = (255, 0, 0, 40) if self.is_alerted else (0, 255, 0, 30)
 
-        from src.settings import SCREEN_WIDTH, SCREEN_HEIGHT
         vision_surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-
-        # ФІКС: додаємо координати камери до позиції ворога у світі
         screen_pos = self.pos + pygame.math.Vector2(camera.camera_rect.x, camera.camera_rect.y)
         points = [screen_pos]
 
@@ -214,11 +208,11 @@ class Enemy(pygame.sprite.Sprite):
             # Ворог спокійний
             self.view_radius = self.base_view_radius
             self.view_angle = self.base_view_angle
-            from src.settings import ENEMY_TYPES
-            self.speed = ENEMY_TYPES["rookie"]["speed"]
+
+            # ФІКС: Замість хардкоду "rookie", тепер береться базова швидкість поточного типу ворога
+            self.speed = self.stats["speed"] * 0.6  # Наприклад, у патрулі ходять повільніше, ніж біжать при тривозі
 
             if can_see_player:
-                # Гравець на очах — підозра зростає (заповниться за ~30-40 кадрів)
                 self.suspicion += 0.025
                 if self.suspicion >= 1.0:
                     self.suspicion = 1.0
@@ -228,7 +222,6 @@ class Enemy(pygame.sprite.Sprite):
                     self.patrol_wait_timer = 0
                     self.path = []
             else:
-                # Гравця не видно — підозра спадає
                 self.suspicion -= 0.015
                 if self.suspicion < 0:
                     self.suspicion = 0.0
@@ -240,7 +233,6 @@ class Enemy(pygame.sprite.Sprite):
             self.speed = self.stats["speed"]
 
             if can_see_player:
-                # Продовжує бачити під час погоні
                 self.last_known_player_pos = pygame.math.Vector2(player.pos)
                 self.lose_interest_timer = ENEMY_LOSE_INTEREST_TIME
                 self.patrol_wait_timer = 0
@@ -251,10 +243,8 @@ class Enemy(pygame.sprite.Sprite):
         target_pos = None
 
         if self.is_alerted and can_see_player:
-            # Атакуємо прямо, тільки якщо активована тривога І ми бачимо ціль
             move_straight_to_player = True
         elif self.is_alerted:
-            # В тривозі, але втратили з поля зору — йдемо до останньої точки
             if self.last_known_player_pos:
                 if self.pos.distance_to(self.last_known_player_pos) <= 15:
                     self.path = []
@@ -262,7 +252,7 @@ class Enemy(pygame.sprite.Sprite):
                     if self.lose_interest_timer <= 0:
                         self.is_alerted = False
                         self.last_known_player_pos = None
-                        self.suspicion = 0.0  # Скидаємо підозру при заспокоєнні
+                        self.suspicion = 0.0
                 else:
                     target_pos = self.last_known_player_pos
             else:
@@ -270,7 +260,6 @@ class Enemy(pygame.sprite.Sprite):
                 self.suspicion = 0.0
 
         if not self.is_alerted and self.patrol_points:
-            # Звичайне патрулювання, коли немає тривоги
             current_target = self.patrol_points[self.current_patrol_idx]
             if self.pos.distance_to(current_target) <= 15:
                 self.path = []
@@ -282,6 +271,7 @@ class Enemy(pygame.sprite.Sprite):
             else:
                 target_pos = current_target
 
+        # Стрільба та пряме переслідування
         if move_straight_to_player:
             direction = player.pos - self.pos
             if direction.length() > 0:
@@ -292,10 +282,6 @@ class Enemy(pygame.sprite.Sprite):
             if self.shoot_cooldown > 0:
                 self.shoot_cooldown -= 1
             else:
-                from src.objects.bullet import Bullet
-                from src.settings import WEAPONS
-                import random
-
                 _, angle = direction.as_polar()
                 spread_val = 15 if self.type == "rookie" else 5
                 angle += random.uniform(-spread_val, spread_val)
@@ -305,6 +291,7 @@ class Enemy(pygame.sprite.Sprite):
                                            True)
                 self.shoot_cooldown = 45 if self.type == "rookie" else 15
 
+        # Пошук шляху за алгоритмом A*
         elif target_pos:
             self.shoot_cooldown = 0
             self.path_update_timer -= 1
@@ -319,13 +306,16 @@ class Enemy(pygame.sprite.Sprite):
             if self.path_update_timer <= 0:
                 self.path_update_timer = 15
                 grid = Grid(matrix=game_matrix)
-                start_node = grid.node(start_x, start_y)
-                end_node = grid.node(end_x, end_y)
 
-                finder = AStarFinder()
-                self.path, _ = finder.find_path(start_node, end_node, grid)
-                if len(self.path) > 0:
-                    self.path.pop(0)
+                # ФІКС: Безпечна перевірка точок на випадок зсувів об'єктів
+                if grid.walkable(start_x, start_y) and grid.walkable(end_x, end_y):
+                    start_node = grid.node(start_x, start_y)
+                    end_node = grid.node(end_x, end_y)
+
+                    finder = AStarFinder()
+                    self.path, _ = finder.find_path(start_node, end_node, grid)
+                    if len(self.path) > 0:
+                        self.path.pop(0)
 
             if self.path:
                 target_grid_x, target_grid_y = self.path[0]
