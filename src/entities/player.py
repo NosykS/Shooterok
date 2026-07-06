@@ -3,7 +3,8 @@ import pygame
 import random
 from src.settings import (
     WORLD_WIDTH, WORLD_HEIGHT, WEAPONS, PLAYER_SPEED_NORMAL,
-    PLAYER_SPEED_STEALTH, PLAYER_NOISE_NORMAL, PLAYER_NOISE_STEALTH
+    PLAYER_SPEED_STEALTH, PLAYER_NOISE_NORMAL, PLAYER_NOISE_STEALTH,
+    TILE_SIZE
 )
 from src.objects.bullet import Bullet
 
@@ -27,7 +28,7 @@ class Player(pygame.sprite.Sprite):
 
         # Стелс характеристики
         self.speed = PLAYER_SPEED_NORMAL
-        self.current_noise_radius = 0  # Починаємо з нуля, шум генерується діями
+        self.current_noise_radius = 0  # Шум генерується діями
         self.is_hidden = False  # Чи сховався в кущах/шафі
 
         self.weapons = ["knife", "pistol_silenced", "rifle"]
@@ -44,7 +45,8 @@ class Player(pygame.sprite.Sprite):
         self.last_shot_time = 0
 
     def _create_placeholder_image(self):
-        surface = pygame.Surface((50, 50), pygame.SRCALPHA)
+        # ОПТИМІЗАЦІЯ: Додано .convert_alpha() для швидкого рендерингу та обертання
+        surface = pygame.Surface((50, 50), pygame.SRCALPHA).convert_alpha()
         pygame.draw.circle(surface, (0, 128, 255), (25, 25), 20)
         pygame.draw.line(surface, (255, 0, 0), (25, 25), (50, 25), 4)
         return surface
@@ -84,32 +86,45 @@ class Player(pygame.sprite.Sprite):
             dx *= 0.7071
             dy *= 0.7071
 
-        # Якщо гравець рухається — присвоюємо шум руху, якщо стоїть — 0
-        # (Але не перебиваємо шум від пострілу, який ставиться в attack())
+        # Якщо гравець рухається — присвоюємо шум руху, якщо стоїть — плавно гасимо його
         if dx == 0 and dy == 0:
-            self.current_noise_radius = max(0, self.current_noise_radius - 2) # Плавне згасання спалаху шуму
+            self.current_noise_radius = max(0, self.current_noise_radius - 2)
         else:
             self.current_noise_radius = max(base_noise, self.current_noise_radius - 1)
 
-        # Рух X з колізіями
-        self.pos.x += dx
-        self.hitbox.centerx = self.pos.x
-        for obstacle in obstacles:
-            if self.hitbox.colliderect(obstacle.rect):
-                if dx > 0: self.hitbox.right = obstacle.rect.left
-                if dx < 0: self.hitbox.left = obstacle.rect.right
-                self.pos.x = self.hitbox.centerx
+        # ОПТИМІЗАЦІЯ (Spatial Culling): Фільтруємо стіни.
+        # Перевіряємо колізії ТІЛЬКИ зі стінами, які знаходяться в радіусі двох тайлів від гравця.
+        nearby_obstacles = [
+            obs for obs in obstacles
+            if abs(obs.rect.centerx - self.pos.x) < TILE_SIZE * 2 and
+               abs(obs.rect.centery - self.pos.y) < TILE_SIZE * 2
+        ]
 
-        # Рух Y з колізіями
-        self.pos.y += dy
-        self.hitbox.centery = self.pos.y
-        for obstacle in obstacles:
-            if self.hitbox.colliderect(obstacle.rect):
-                if dy > 0: self.hitbox.bottom = obstacle.rect.top
-                if dy < 0: self.hitbox.top = obstacle.rect.bottom
-                self.pos.y = self.hitbox.centery
+        # Рух по X з колізіями (виправлено синхронізацію хітбокса і позиції)
+        if dx != 0:
+            self.pos.x += dx
+            self.hitbox.centerx = self.pos.x
+            for obstacle in nearby_obstacles:
+                if self.hitbox.colliderect(obstacle.rect):
+                    if dx > 0:
+                        self.hitbox.right = obstacle.rect.left
+                    elif dx < 0:
+                        self.hitbox.left = obstacle.rect.right
+                    self.pos.x = self.hitbox.centerx
 
-        # Обмеження під великий світ
+        # Рух по Y з колізіями
+        if dy != 0:
+            self.pos.y += dy
+            self.hitbox.centery = self.pos.y
+            for obstacle in nearby_obstacles:
+                if self.hitbox.colliderect(obstacle.rect):
+                    if dy > 0:
+                        self.hitbox.bottom = obstacle.rect.top
+                    elif dy < 0:
+                        self.hitbox.top = obstacle.rect.bottom
+                    self.pos.y = self.hitbox.centery
+
+        # Обмеження під межі великого світу
         if self.pos.x < 0: self.pos.x = 0
         if self.pos.x > WORLD_WIDTH: self.pos.x = WORLD_WIDTH
         if self.pos.y < 0: self.pos.y = 0
@@ -149,7 +164,6 @@ class Player(pygame.sprite.Sprite):
         # 2. Обробка атаки ближнього бою
         if self.current_weapon == "knife":
             self.last_shot_time = current_time
-            # Ніж теж видає мікро-шум при змаху
             self.current_noise_radius = weapon_stats.get("noise_radius", 15)
             return "melee"
 
@@ -157,7 +171,7 @@ class Player(pygame.sprite.Sprite):
         if self.weapons_ammo[self.current_weapon] <= 0:
             return None
 
-        # Витрачаємо один набій та встановлюємо спалах шуму з конфігу зброї!
+        # Витрачаємо один набій та встановлюємо спалах шуму
         self.weapons_ammo[self.current_weapon] -= 1
         self.last_shot_time = current_time
         self.current_noise_radius = weapon_stats["noise_radius"]

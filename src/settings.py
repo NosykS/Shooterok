@@ -95,3 +95,31 @@ ENEMY_LOSE_INTEREST_TIME = 60 * 5 # 5 секунд при 60 FPS
 
 # Затримка реакції ворога (в кадрах). Поки що просто константа на майбутнє
 ENEMY_REACTION_TIME = 30
+
+# Місії типи та умови виконання
+MISSION_CONFIGS = {
+    1: {
+        "title": "Місія 1: Тихі кроки",
+        "type": "STEALTH_ESCAPE",
+        "description": "Дійди до точки евакуації. Якщо ворог тебе виявить — місію провалено!",
+        "fail_on_alert": True,
+        "objectives": ["escape"],
+        "enemies_count": 3
+    },
+    2: {
+        "title": "Місія 2: Зачистка сектора",
+        "type": "ELIMINATION",
+        "description": "Знайди та ліквідуй усіх ворогів на локації.",
+        "fail_on_alert": False,
+        "objectives": ["kill_all"],
+        "enemies_count": 5
+    },
+    3: {
+        "title": "Місія 3: Викрадення даних",
+        "type": "DATA_HEIST",
+        "description": "Знайди секретні документи та дістанься виходу. Шпигуй або проривайся з боєм!",
+        "fail_on_alert": False,
+        "objectives": ["collect_data", "escape"],
+        "enemies_count": 4
+    }
+}
