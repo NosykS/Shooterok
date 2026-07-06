@@ -6,7 +6,7 @@ from pathfinding.core.grid import Grid
 from pathfinding.finder.a_star import AStarFinder
 from src.settings import (
     ENEMY_TYPES, TILE_SIZE, ENEMY_LOSE_INTEREST_TIME,
-    WEAPONS, WORLD_WIDTH, WORLD_HEIGHT
+    WEAPONS, WORLD_WIDTH, WORLD_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT
 )
 from src.objects.bullet import Bullet
 
@@ -40,7 +40,8 @@ class Enemy(pygame.sprite.Sprite):
         self.view_angle = self.base_view_angle
 
         # Створення базової графічної поверхні ворога (кола з вектором напрямку погляду)
-        self.base_image = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+        # ОПТИМІЗАЦІЯ: Обов'язково додаємо convert_alpha()
+        self.base_image = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA).convert_alpha()
         pygame.draw.circle(self.base_image, self.color, (TILE_SIZE // 2, TILE_SIZE // 2), TILE_SIZE // 2 - 2)
         pygame.draw.line(self.base_image, (0, 0, 0), (TILE_SIZE // 2, TILE_SIZE // 2), (TILE_SIZE, TILE_SIZE // 2), 3)
         self.image = self.base_image.copy()
@@ -72,11 +73,15 @@ class Enemy(pygame.sprite.Sprite):
             self.generate_patrol_route(game_matrix, x, y)
 
         # Таймери та масив для пошуку шляхів алгоритмом A*
-        self.path_update_timer = 0
+        # ОПТИМІЗАЦІЯ: Рандомізуємо початковий таймер, щоб ШІ не робив A* одночасно
+        self.path_update_timer = random.randint(0, 15)
         self.path = []
 
         # Посилання на випущену кулю для передачі в ядро гри game.py
         self.fired_bullet = None
+
+        # ОПТИМІЗАЦІЯ: Тимчасовий лічильник для пропуску перевірки зору (Raycast) кожен кадр
+        self.raycast_timer = random.randint(0, 3)
 
     def draw_health_bar(self, screen, camera):
         """Відображення індикаторів здоров'я та броні ворога на екрані з урахуванням зміщення камери"""
@@ -136,60 +141,66 @@ class Enemy(pygame.sprite.Sprite):
         """Візуалізація полігонального сектора огляду ворога з урахуванням великого світу та камери"""
         cone_color = (255, 0, 0, 40) if self.is_alerted else (0, 255, 0, 30)
 
-        # Створюємо тимчасову поверхню під розмір ВСЬОГО світу для альфа-каналу
-        vision_surface = pygame.Surface((WORLD_WIDTH, WORLD_HEIGHT), pygame.SRCALPHA)
+        # ОПТИМІЗАЦІЯ: Створюємо поверхню розміром ЛИШЕ з екран гри, а не всього світу!
+        vision_surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
 
-        # Центр конуса — це позиція самого ворога
-        points = [self.pos]
+        # Переводимо позицію ворога з координат світу в координати екрана
+        screen_pos = self.pos + pygame.math.Vector2(camera.camera_rect.x, camera.camera_rect.y)
+        points = [screen_pos]
 
-        num_segments = 30
+        num_segments = 16  # ОПТИМІЗАЦІЯ: Зменшено з 30 до 16 точок (візуально різниця непомітна, математики менше)
         _, current_angle = self.rotation_vector.as_polar()
         start_angle = current_angle - self.view_angle / 2
 
-        # Розраховуємо точки по дузі конуса огляду
+        # Розраховуємо точки по дузі конуса огляду (вже відносно екрана)
         for i in range(num_segments + 1):
             angle = start_angle + (self.view_angle / num_segments) * i
             rad = math.radians(angle)
-            target_point = self.pos + pygame.math.Vector2(math.cos(rad), math.sin(rad)) * self.view_radius
+            target_point = screen_pos + pygame.math.Vector2(math.cos(rad), math.sin(rad)) * self.view_radius
             points.append(target_point)
 
         if len(points) >= 3:
             pygame.draw.polygon(vision_surface, cone_color, points)
 
-        # Малюємо поверхню на екран із застосуванням поточного зсуву камери
-        screen.blit(vision_surface, (camera.camera_rect.x, camera.camera_rect.y))
+        # Малюємо оптимізовану поверхню прямо на екран в (0,0)
+        screen.blit(vision_surface, (0, 0))
 
     def check_for_player(self, player, obstacles):
         """Перевіряє, чи знаходиться гравець у конусі зору ворога і чи немає між ними стін (Line of Sight)"""
         enemy_to_player = player.pos - self.pos
         distance = enemy_to_player.length()
 
-        # Якщо гравець за межами радіуса бачення — одразу False
         if distance > self.view_radius:
             return False
 
-        # Якщо гравець сховався в кущах/шафі — ворог його не бачить
         if getattr(player, "is_hidden", False):
             return False
 
         _, enemy_angle = self.rotation_vector.as_polar()
         _, angle_to_player = enemy_to_player.as_polar()
 
-        # Розрахунок мінімальної кутової різниці
         angle_diff = (angle_to_player - enemy_angle) % 360
         if angle_diff > 180:
             angle_diff = 360 - angle_diff
 
-        # Якщо кут між поглядом ворога та гравцем більший за половину конуса — гравець поза зоною
         if angle_diff > self.view_angle / 2:
             return False
 
-        # Точний геометричний рейкаст через clipline: перевірка перетину лінії зору зі стінами
+        # ОПТИМІЗАЦІЯ: Перевіряємо геометричний рейкаст через clipline рідше
+        # Замість перевірки кожен кадр, використовуємо збережений стан, крім випадків коли гравець зовсім близько
+        if distance > 60:
+            self.raycast_timer -= 1
+            if self.raycast_timer > 0 and hasattr(self, "_last_los_result"):
+                return self._last_los_result
+            self.raycast_timer = 3  # Перевіряємо раз на 3 кадри
+
         if distance > 0:
             for obstacle in obstacles:
                 if obstacle.rect.clipline(self.pos.x, self.pos.y, player.pos.x, player.pos.y):
+                    self._last_los_result = False
                     return False
 
+        self._last_los_result = True
         return True
 
     def generate_patrol_route(self, game_matrix, start_x, start_y):
@@ -208,7 +219,6 @@ class Enemy(pygame.sprite.Sprite):
                 pixel_x = gx * TILE_SIZE + TILE_SIZE // 2
                 pixel_y = gy * TILE_SIZE + TILE_SIZE // 2
                 new_pos = pygame.math.Vector2(pixel_x, pixel_y)
-                # Перевіряємо, щоб точки не спавнилися занадто близько одна до одної
                 if all(p.distance_to(new_pos) > TILE_SIZE * 3 for p in self.patrol_points):
                     self.patrol_points.append(new_pos)
 
@@ -240,7 +250,6 @@ class Enemy(pygame.sprite.Sprite):
                 if self.suspicion < 0:
                     self.suspicion = 0.0
         else:
-            # У стані тривоги зіниці ворога розширюються (кут та радіус зору значно збільшуються)
             self.suspicion = 1.0
             self.view_radius = self.base_view_radius * 2.5
             self.view_angle = min(360, self.base_view_angle + 80)
@@ -260,7 +269,6 @@ class Enemy(pygame.sprite.Sprite):
             move_straight_to_player = True
         elif self.is_alerted:
             if self.last_known_player_pos:
-                # Перевіряємо, чи прибув ворог на останню відому позицію гравця
                 if self.pos.distance_to(self.last_known_player_pos) <= 15:
                     self.path = []
                     self.lose_interest_timer -= 1
@@ -295,23 +303,20 @@ class Enemy(pygame.sprite.Sprite):
                 self.pos += self.rotation_vector * self.speed
             self.hitbox.center = self.pos
 
-            # Обробка таймера перезарядки зброї
             if self.shoot_cooldown > 0:
                 self.shoot_cooldown -= 1
             else:
                 _, angle = direction.as_polar()
-                # Розраховуємо розліт куль на основі характеристик зброї ворога
                 spread_val = w_stats.get("spread", 5)
                 angle += random.uniform(-spread_val, spread_val)
 
-                # Генеруємо об'єкт кулі (game.py перехопить її, якщо гравець не впритул)
                 self.fired_bullet = Bullet(
                     self.pos.x, self.pos.y, angle,
                     w_stats["damage"], w_stats["bullet_speed"], True
                 )
-                self.shoot_cooldown = w_stats["shoot_cooldown"] // 16  # Переведення мілісекунд у кадри
+                self.shoot_cooldown = w_stats["shoot_cooldown"] // 16
 
-        # Сценарій Б: Обхід перешкод за допомогою алгоритму пошуку шляху A* (якщо є проміжна ціль)
+        # Сценарій Б: Обхід перешкод за допомогою алгоритму пошуку шляху A*
         elif target_pos:
             if self.shoot_cooldown > 0:
                 self.shoot_cooldown -= 1
@@ -320,15 +325,14 @@ class Enemy(pygame.sprite.Sprite):
             max_grid_x = len(game_matrix[0]) - 1
             max_grid_y = len(game_matrix) - 1
 
-            # Конвертація піксельних координат у індекси двовимірної матриці карти
             start_x = max(0, min(int(self.pos.x // TILE_SIZE), max_grid_x))
             start_y = max(0, min(int(self.pos.y // TILE_SIZE), max_grid_y))
             end_x = max(0, min(int(target_pos.x // TILE_SIZE), max_grid_x))
             end_y = max(0, min(int(target_pos.y // TILE_SIZE), max_grid_y))
 
-            # Оптимізація: перераховуємо шлях A* не кожен кадр, а раз на 15 кадрів
+            # Оптимізація: перераховуємо шлях A* раз на 30 кадрів (а не 15) для економії CPU
             if self.path_update_timer <= 0:
-                self.path_update_timer = 15
+                self.path_update_timer = 30
                 grid = Grid(matrix=game_matrix)
 
                 if grid.walkable(start_x, start_y) and grid.walkable(end_x, end_y):
@@ -338,7 +342,7 @@ class Enemy(pygame.sprite.Sprite):
                     finder = AStarFinder()
                     self.path, _ = finder.find_path(start_node, end_node, grid)
                     if len(self.path) > 0:
-                        self.path.pop(0)  # Видаляємо початкову точку, де ворог уже стоїть
+                        self.path.pop(0)
 
             # Покрокове переміщення по знайдених нодах шляху A*
             if self.path:
@@ -357,7 +361,6 @@ class Enemy(pygame.sprite.Sprite):
                     if len(self.path) > 0:
                         self.path.pop(0)
             else:
-                # Фоллбек механіка: якщо шлях не знайдено, рухаємося напряму
                 direction = target_pos - self.pos
                 if direction.length() > self.speed:
                     self.rotation_vector = direction.normalize()
