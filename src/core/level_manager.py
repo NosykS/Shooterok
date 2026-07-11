@@ -14,7 +14,15 @@ class LevelManager:
 
     def reset_game_world(self, new_map=True, new_level=False):
         """Повне або часткове скидання стану сцени для перезапуску або переходу на новий рівень"""
-        self.game.player = Player(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
+        # 1. Спочатку створюємо гравця
+        self.game.player = Player(self.game, SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
+
+        # 2. Застосовуємо апгрейди та підтягуємо стані з профілю
+        self.game.apply_player_upgrades()
+
+        # 3. І ТІЛЬКИ ТЕПЕР примусово видаємо набої, щоб апгрейди/збереження їх не затерли!
+        self.game.player.refill_all_ammo()
+
         self.game.gunshot_visual_timer = 0
         self.game.knife_visual_timer = 0
 

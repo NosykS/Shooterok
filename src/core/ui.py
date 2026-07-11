@@ -115,7 +115,8 @@ def draw_player_bars(screen, player, font_small):
 def draw_game_ui(screen, player, enemies, keys, font_small):
     """ФІКС: Прибрано дублюючий аргумент WEAPONS, додано загальний стелс-індикатор небезпеки"""
     weapon_name = player.current_weapon.upper()
-    weapon_stats = WEAPONS[player.current_weapon]
+
+    weapon_stats = WEAPONS.get(player.current_weapon, WEAPONS["pistol_silenced"])
 
     if weapon_stats['ammo_capacity'] > 0:
         ammo_str = f"AMMO: {player.ammo}/{weapon_stats['ammo_capacity']}"

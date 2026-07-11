@@ -89,3 +89,8 @@ class CollisionManager:
         enemy.lose_interest_timer = ENEMY_LOSE_INTEREST_TIME
         if enemy.hp <= 0:
             enemy.kill()
+
+            # Нагорода за ліквідацію ворога з вогнепальної зброї
+            self.game.progression.add_xp(100)
+            self.game.shop.add_money(30)
+            print(f"[REWARD] Ворог знищений! +100 XP | +30$")
