@@ -68,12 +68,26 @@ class InputHandler:
                 self.game.missions.spawn_mission_objectives()
             elif event.key == pygame.K_e:
                 if self.game.player.is_hidden:
+                    # ВИХІД ЗІ СХОВАНКИ: Телепортуємо у безпечну точку виходу цього куща
+                    if hasattr(self.game.player, "current_hideout") and self.game.player.current_hideout:
+                        if hasattr(self.game.player.current_hideout, "exit_pos"):
+                            self.game.player.pos = pygame.math.Vector2(self.game.player.current_hideout.exit_pos)
+                        self.game.player.current_hideout = None
+
                     self.game.player.is_hidden = False
+                    self.game.player.hitbox.center = self.game.player.pos
+                    self.game.player.rect.center = self.game.player.pos
+                    print("[STEALTH] Гравець вийшов у безпечну точку.")
                 else:
+                    # ВХІД У СХОВАНКУ: Шукаємо найближчий кущ
                     hit_spot = pygame.sprite.spritecollideany(self.game.player, self.game.hiding_spots)
                     if hit_spot:
                         self.game.player.is_hidden = True
+                        self.game.player.current_hideout = hit_spot
                         self.game.player.pos = pygame.math.Vector2(hit_spot.rect.center)
+                        self.game.player.hitbox.center = self.game.player.pos
+                        self.game.player.rect.center = self.game.player.pos
+                        print("[STEALTH] Гравець сховався.")
 
     def _handle_menu_inputs(self, event):
         """Обробка натискань клавіатури в інтерфейсах меню"""

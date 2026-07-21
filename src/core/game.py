@@ -62,10 +62,10 @@ class Game:
         pygame.font.init()
         self.pause_font_title = pygame.font.SysFont("Arial", 48, bold=True)
         self.pause_font_btn = pygame.font.SysFont("Arial", 22, bold=True)
-        # НОВИЙ ШРИФТ: Створюємо компактний шрифт для тексту всередині ХП та Броні
+        # Створюємо компактний шрифт для тексту всередині ХП та Броні
         self.hud_small_font = pygame.font.SysFont("Arial", 14, bold=True)
 
-        # Ініціалізація менеджерів
+        # Ініціалізація менеджерів (порядковий номер місії береться при старті гри)
         self.levels = LevelManager(self)
         self.missions = MissionManager(self)
         self.collision_ctrl = CollisionManager(self)
@@ -92,8 +92,8 @@ class Game:
 
         # 3. Бонус до швидкості: +10% до швидкості за кожен рівень прокачки
         speed_level = self.profile_data["upgrades"].get("speed", 0)
-        # Припустимо, базова швидкість гравця у вас 4, додаємо коефіцієнт
-        self.player.speed = 4 * (1.0 + (speed_level * 0.1))
+        # Оновлюємо саме base_speed гравця, щоб уникнути конфліктів під час бігу/стелсу
+        self.player.base_speed = 4 * (1.0 + (speed_level * 0.1))
 
     def _init_ui_buttons(self):
         """Ініціалізація інтерактивних UI кнопок для всіх типів екранів меню"""
@@ -116,7 +116,7 @@ class Game:
             UIButton(cx, cy + 20, 260, 45, "СПРОБУВАТИ ЗНОВУ", self.pause_font_btn, b_color, h_color, "RESTART"),
             UIButton(cx, cy + 80, 260, 45, "ГОЛОВНЕ МЕНЮ", self.pause_font_btn, b_color, h_color, "MAIN_MENU")
         ]
-        # Тепер після перемоги йдемо спочатку в магазин/прокачку
+        # Після перемоги йдемо спочатку в магазин/прокачку
         self.victory_buttons = [
             UIButton(cx, cy + 20, 260, 45, "В МАГАЗИН / ПРОКАЧКУ", self.pause_font_btn, green_b, green_h, "OPEN_SHOP"),
             UIButton(cx, cy + 80, 260, 45, "ГОЛОВНЕ МЕНЮ", self.pause_font_btn, b_color, h_color, "MAIN_MENU")
@@ -130,8 +130,7 @@ class Game:
 
         # Кнопки всередині самого екрана Магазину / Прокачки (ідеально вирівняні)
         self.shop_buttons = [
-            UIButton(cx - 140, cy + 160, 240, 45, "НАСТУПНА МІСІЯ", self.pause_font_btn, green_b, green_h,
-                     "NEXT_MISSION"),
+            UIButton(cx - 140, cy + 160, 240, 45, "НАСТУПНА МІСІЯ", self.pause_font_btn, green_b, green_h, "NEXT_MISSION"),
             UIButton(cx + 140, cy + 160, 240, 45, "ГОЛОВНЕ МЕНЮ", self.pause_font_btn, b_color, h_color, "MAIN_MENU"),
 
             # Кнопки для швидкої прокачки характеристик (Центри кнопок вирівняні за рядками тексту)
@@ -168,7 +167,8 @@ class Game:
                 if angle_diff <= 45:
                     if not enemy.is_alerted:
                         enemy.hp = 0
-                        print(f"Тихий кіл ножем! Ворог {enemy.type} ліквідований.")
+                        e_type = getattr(enemy, 'enemy_type', getattr(enemy, 'type', 'unknown'))
+                        print(f"Тихий кіл ножем! Ворог {e_type} ліквідований.")
                     else:
                         enemy.hp -= WEAPONS["knife"]["damage"]
                         print(f"Поранення ножем! HP ворога: {enemy.hp}")
@@ -180,7 +180,6 @@ class Game:
 
                     if enemy.hp <= 0:
                         enemy.kill()
-                        # ДОДАНО: Нагорода за ніж (більша, бо це скритне вбивство)
                         self.progression.add_xp(150)
                         self.shop.add_money(50)
 
@@ -193,13 +192,11 @@ class Game:
             if attack_result == "melee":
                 self.execute_knife_attack()
 
-            elif attack_result:  # Очікуємо, що тут прилетить список [Bullet, Bullet, ...]
-                # Проходимо циклом по кожній дробині/кулі зі списку
+            elif attack_result:  # Очікуємо список [Bullet, Bullet, ...]
                 for bullet in attack_result:
                     self.all_sprites.add(bullet)
                     self.bullets.add(bullet)
 
-                # Візуальні ефекти спалаху беремо від поточної зброї
                 weapon_stats = WEAPONS[self.player.current_weapon]
                 self.gunshot_visual_timer = 8
                 self.gunshot_visual_pos = (int(self.player.pos.x), int(self.player.pos.y))
@@ -229,20 +226,27 @@ class Game:
         keys = pygame.key.get_pressed()
         self.player.update(keys, self.obstacles, self.camera)
 
+        # Камера оновлюється одразу після руху гравця
+        self.camera.update(self.player)
+
         self._handle_attacks()
         self.bullets.update()
 
-        # Оптимізований апдейт ШІ (AI Throttling)
+        # Оптимізований апдейт ШІ (AI Throttling) з урахуванням камери
         update_bound = pygame.Rect(
             -self.camera.camera_rect.x - 200, -self.camera.camera_rect.y - 200,
             SCREEN_WIDTH + 400, SCREEN_HEIGHT + 400
         )
 
+        # Безпечно витягуємо матрицю. Якщо її немає (рівень не завантажено) — підставляємо порожній список
+        active_matrix = self.game_matrix if self.game_matrix is not None else []
+
         for enemy in self.enemies:
+            # Передаємо згенеровану матрицю, захищаючи від TypeError
             if update_bound.colliderect(enemy.rect) or enemy.is_alerted:
-                enemy.update(self.player, self.game_matrix, self.obstacles)
+                enemy.update(self.player, active_matrix, self.obstacles)
             elif (self.frame_counter + id(enemy)) % 6 == 0:
-                enemy.update(self.player, self.game_matrix, self.obstacles)
+                enemy.update(self.player, active_matrix, self.obstacles)
 
         # Створення куль для ворогів
         for enemy in self.enemies:
@@ -256,7 +260,7 @@ class Game:
         self._check_environmental_sounds()
         self.collision_ctrl.handle_all_collisions()
 
-        # Логіка фіксації перемоги, видачі нагород та автозбереження
+        # Логіка перемоги та збереження прогресу
         old_state = self.game_state
         self.missions.check_mission_conditions(self.frame_counter)
 
@@ -274,7 +278,7 @@ class Game:
             print(f"[SAVE] Автозбереження успішне! Нагорода: +{mission_money}$ | +{mission_xp} XP")
 
     def draw(self):
-        """Оптимізований рендеринг графічних шарів із відсіканням (Culling) об'єктів поза екраном"""
+        """Рендеринг графічних шарів із безпечним відображенням об'єктів"""
         if self.game_state == "MENU":
             self.screen.fill((15, 20, 30))
             title = self.pause_font_title.render("STEALTH ACTION", True, (0, 150, 255))
@@ -287,15 +291,16 @@ class Game:
             self._draw_shop_screen()
             return
 
-        if self.game_state == "PLAYING":
-            self.camera.update(self.player)
-
+        # Очищаємо екран і малюємо підлогу та декорації з TMX за допомогою камери
         self.screen.fill(BG_COLOR)
+        self.levels.draw_floor(self.screen, self.camera)
+
+        # Координати прямокутника екрану у світових координатах для перевірки видимості
         screen_bound = pygame.Rect(-self.camera.camera_rect.x, -self.camera.camera_rect.y, SCREEN_WIDTH, SCREEN_HEIGHT)
 
         # 1. Конуси зору ШІ
         for enemy in self.enemies:
-            if screen_bound.colliderect(enemy.rect):
+            if screen_bound.inflate(100, 100).colliderect(enemy.rect):
                 enemy.draw_vision_cone(self.screen, self.camera)
 
         # 2. Шар спалахів
@@ -315,24 +320,24 @@ class Game:
             color = (255, 100, 100) if self.player.current_noise_radius > 40 else (0, 150, 255)
             pygame.draw.circle(self.screen, color, noise_pos, int(self.player.current_noise_radius), 1)
 
-        # 4. Рендеринг видимих об'єктів (Frustum Culling)
+        # 4. Рендеринг об'єктів
         for sprite in self.all_sprites:
-            if sprite == self.player and self.player.is_hidden: continue
-            if not screen_bound.colliderect(sprite.rect): continue
+            # НЕ рендеримо технічні зони ховання та прихованого гравця
+            if sprite in self.hiding_spots:
+                continue
+            if sprite == self.player and self.player.is_hidden:
+                continue
             self.screen.blit(sprite.image, self.camera.apply(sprite))
 
         # 5. Індикатори ворогів та кулі
         for enemy in self.enemies:
-            if screen_bound.colliderect(enemy.rect):
-                enemy.draw_health_bar(self.screen, self.camera)
-                enemy.draw_suspicion_bar(self.screen, self.camera)
+            enemy.draw_health_bar(self.screen, self.camera)
+            enemy.draw_suspicion_bar(self.screen, self.camera)
 
         for bullet in list(self.bullets):
-            if screen_bound.colliderect(bullet.rect):
-                self.screen.blit(bullet.image, self.camera.apply(bullet))
+            self.screen.blit(bullet.image, self.camera.apply(bullet))
 
         # 6. Панелі HUD
-        # ВИПРАВЛЕНО: передаємо новий маленький шрифт hud_small_font замість великого pause_font_btn
         draw_player_bars(self.screen, self.player, self.hud_small_font)
         draw_game_ui(self.screen, self.player, self.enemies, pygame.key.get_pressed(), self.pause_font_btn)
 
@@ -365,7 +370,6 @@ class Game:
         """Рендеринг модальних контекстних вікон для відображення системних станів гри"""
         if self.game_state not in ["PAUSE", "GAME_OVER", "VICTORY", "VICTORY_ALL"]: return
 
-        # ВИПРАВЛЕНО: Якщо це екран фіналу кампанії (VICTORY_ALL), робимо рамку ширшою (420 замість 340)
         if self.game_state == "VICTORY_ALL":
             menu_w, menu_h = 420, 380
         else:
@@ -403,11 +407,9 @@ class Game:
         self.screen.fill((20, 25, 35))
         cx, cy = SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2
 
-        # Заголовок екрана
         title = self.pause_font_title.render("БАЗА / КРАМНИЦЯ ОНОВЛЕНЬ", True, (0, 200, 255))
         self.screen.blit(title, title.get_rect(center=(cx, 60)))
 
-        # Відображення поточних ресурсів гравця
         stats_y = 120
         money_surf = self.pause_font_btn.render(f"Баланс: {self.profile_data['money']}$", True, (255, 215, 0))
         xp_surf = self.pause_font_btn.render(
@@ -419,10 +421,10 @@ class Game:
         self.screen.blit(xp_surf, (cx - 40, stats_y))
         self.screen.blit(sp_surf, (cx + 120, stats_y))
 
-        # --- ЛІВА ПАНЕЛЬ: ПРОКАЧКА ХАРАКТЕРИСТИК (Збільшено висоту до 200, щоб текст дихав) ---
+        # --- ЛІВА ПАНЕЛЬ: ПРОКАЧКА ХАРАКТЕРИСТИК ---
         pygame.draw.rect(self.screen, (30, 35, 45), (cx - 280, cy - 70, 260, 200), border_radius=8)
         pygame.draw.rect(self.screen, (0, 255, 150), (cx - 280, cy - 70, 260, 200), width=1,
-                         border_radius=8)  # тонка рамка
+                         border_radius=8)
 
         left_title = self.pause_font_btn.render("Прокачка персонажа", True, (0, 255, 150))
         self.screen.blit(left_title, (cx - 260, cy - 55))
@@ -431,7 +433,6 @@ class Game:
         arm_lv = self.profile_data["upgrades"].get("max_armor", 0)
         sp_lv = self.profile_data["upgrades"].get("speed", 0)
 
-        # Текст вирівняний точно навпроти кнопок "+"
         self.screen.blit(self.hud_small_font.render(f"Макс Здоров'я (Рівень {hp_lv}/5)", True, (255, 255, 255)),
                          (cx - 275, cy - 22))
         self.screen.blit(self.hud_small_font.render(f"Макс Броня (Рівень {arm_lv}/5)", True, (255, 255, 255)),
@@ -449,10 +450,8 @@ class Game:
         rif_status = "КУПЛЕНО" if "rifle" in self.profile_data["unlocked_weapons"] else "Штурмова гвинтівка"
         sht_status = "КУПЛЕНО" if "shotgun" in self.profile_data["unlocked_weapons"] else "Дробовик"
 
-        # Текст вирівняний точно навпроти кнопок ціни
         self.screen.blit(self.hud_small_font.render(rif_status, True, (255, 255, 255)), (cx + 40, cy - 22))
         self.screen.blit(self.hud_small_font.render(sht_status, True, (255, 255, 255)), (cx + 40, cy + 18))
 
-        # Малюємо всі кнопки для магазину
         for btn in self.shop_buttons:
             btn.draw(self.screen)
