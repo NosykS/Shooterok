@@ -7,7 +7,7 @@ from src.settings import (
 )
 from src.core.ui import (
     draw_controls_help, draw_player_bars, draw_game_ui,
-    draw_gunshot_flash, draw_knife_swing, UIButton
+    draw_gunshot_flash, draw_knife_swing, UIButton, UISlider
 )
 from src.core.crosshair import CrosshairController
 from src.core.camera import Camera
@@ -46,7 +46,17 @@ class Game:
         self.game_matrix = None
 
         self.camera = Camera(WORLD_WIDTH, WORLD_HEIGHT)
-        self.sound = SoundManager()
+
+        saved_settings = self.profile_data.get("settings", {})
+        self.sound = SoundManager(
+            sfx_volume=saved_settings.get("sfx_volume", 1.0),
+            music_volume=saved_settings.get("music_volume", 1.0)
+        )
+
+        # Стан, в який треба повернутись з екрану налаштувань (MENU або PAUSE)
+        self.settings_return_state = "MENU"
+        # Лічильник кадрів для короткого візуального підтвердження ручного збереження
+        self.save_feedback_timer = 0
 
         # Пам'ять карти
         self.saved_game_matrix = None
@@ -105,14 +115,25 @@ class Game:
         green_b, green_h = (35, 120, 65), (45, 160, 85)
 
         self.pause_buttons = [
-            UIButton(cx, cy - 90, 260, 45, "Продовжити", self.pause_font_btn, b_color, h_color, "CONTINUE"),
-            UIButton(cx, cy - 30, 260, 45, "Перезапустити рівень", self.pause_font_btn, b_color, h_color, "RESTART"),
-            UIButton(cx, cy + 30, 260, 45, "Головне меню", self.pause_font_btn, b_color, h_color, "MAIN_MENU"),
-            UIButton(cx, cy + 90, 260, 45, "Вийти з гри", self.pause_font_btn, red_b, red_h, "QUIT")
+            UIButton(cx, cy - 137, 260, 45, "Продовжити", self.pause_font_btn, b_color, h_color, "CONTINUE"),
+            UIButton(cx, cy - 82, 260, 45, "Перезапустити рівень", self.pause_font_btn, b_color, h_color, "RESTART"),
+            UIButton(cx, cy - 27, 260, 45, "Налаштування", self.pause_font_btn, b_color, h_color, "OPEN_SETTINGS"),
+            UIButton(cx, cy + 28, 260, 45, "Зберегти гру", self.pause_font_btn, green_b, green_h, "SAVE_GAME"),
+            UIButton(cx, cy + 83, 260, 45, "Головне меню", self.pause_font_btn, b_color, h_color, "MAIN_MENU"),
+            UIButton(cx, cy + 138, 260, 45, "Вийти з гри", self.pause_font_btn, red_b, red_h, "QUIT")
         ]
         self.main_menu_buttons = [
-            UIButton(cx, cy - 30, 260, 45, "СТАРТ", self.pause_font_btn, b_color, h_color, "START"),
-            UIButton(cx, cy + 30, 260, 45, "ВИХІД", self.pause_font_btn, red_b, red_h, "QUIT")
+            UIButton(cx, cy - 105, 260, 45, "ПРОДОВЖИТИ", self.pause_font_btn, b_color, h_color, "CONTINUE_GAME"),
+            UIButton(cx, cy - 45, 260, 45, "НОВА ГРА", self.pause_font_btn, b_color, h_color, "NEW_GAME"),
+            UIButton(cx, cy + 15, 260, 45, "НАЛАШТУВАННЯ", self.pause_font_btn, b_color, h_color, "OPEN_SETTINGS"),
+            UIButton(cx, cy + 75, 260, 45, "ВИХІД", self.pause_font_btn, red_b, red_h, "QUIT")
+        ]
+        self.settings_buttons = [
+            UIButton(cx, cy + 150, 260, 45, "Назад", self.pause_font_btn, b_color, h_color, "SETTINGS_BACK"),
+        ]
+        self.settings_sliders = [
+            UISlider(cx, cy - 40, 320, 20, "Гучність музики", self.hud_small_font, self.profile_data["settings"]["music_volume"]),
+            UISlider(cx, cy + 40, 320, 20, "Гучність ефектів", self.hud_small_font, self.profile_data["settings"]["sfx_volume"]),
         ]
         self.game_over_buttons = [
             UIButton(cx, cy + 20, 260, 45, "СПРОБУВАТИ ЗНОВУ", self.pause_font_btn, b_color, h_color, "RESTART"),
@@ -218,6 +239,9 @@ class Game:
         self.crosshair_ctrl.update(self.player, self.camera, self.knife_attack_radius, self.game_state)
         self._sync_background_music()
 
+        if self.save_feedback_timer > 0:
+            self.save_feedback_timer -= 1
+
         if self.game_state != "PLAYING":
             return
 
@@ -293,13 +317,18 @@ class Game:
         if self.game_state == "MENU":
             self.screen.fill((15, 20, 30))
             title = self.pause_font_title.render("STEALTH ACTION", True, (0, 150, 255))
-            self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 120)))
+            self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 190)))
             for btn in self.main_menu_buttons: btn.draw(self.screen)
             return
 
         # Візуалізація екрана Магазину та Прокачки
         if self.game_state == "SHOP":
             self._draw_shop_screen()
+            return
+
+        # Візуалізація екрана Налаштувань
+        if self.game_state == "SETTINGS":
+            self._draw_settings_screen()
             return
 
         # Очищаємо екран і малюємо підлогу та декорації з TMX за допомогою камери
@@ -383,8 +412,10 @@ class Game:
 
         if self.game_state == "VICTORY_ALL":
             menu_w, menu_h = 420, 380
+        elif self.game_state == "PAUSE":
+            menu_w, menu_h = 340, 460
         else:
-            menu_w, menu_h = 340, 380 if self.game_state == "PAUSE" else 260
+            menu_w, menu_h = 340, 260
 
         m_rect = pygame.Rect(SCREEN_WIDTH // 2 - menu_w // 2, SCREEN_HEIGHT // 2 - menu_h // 2, menu_w, menu_h)
 
@@ -403,6 +434,25 @@ class Game:
         self.screen.blit(title_surf, title_surf.get_rect(center=(SCREEN_WIDTH // 2, m_rect.top + 40)))
 
         for btn in buttons: btn.draw(self.screen)
+
+        # Коротке візуальне підтвердження ручного збереження гри
+        if self.game_state == "PAUSE" and self.save_feedback_timer > 0:
+            toast = self.hud_small_font.render("Гру збережено!", True, (100, 255, 150))
+            self.screen.blit(toast, toast.get_rect(center=(SCREEN_WIDTH // 2, m_rect.bottom - 20)))
+
+    def _draw_settings_screen(self):
+        """Рендеринг екрану налаштувань (регулювання гучності звуку/музики)"""
+        self.screen.fill((20, 25, 35))
+        cx, cy = SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2
+
+        title = self.pause_font_title.render("НАЛАШТУВАННЯ", True, (0, 200, 255))
+        self.screen.blit(title, title.get_rect(center=(cx, 90)))
+
+        for slider in self.settings_sliders:
+            slider.draw(self.screen)
+
+        for btn in self.settings_buttons:
+            btn.draw(self.screen)
 
     def run(self):
         """Головний нескінченний цикл виконання додатку"""

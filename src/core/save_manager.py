@@ -16,7 +16,11 @@ DEFAULT_DATA = {
         "speed": 0
     },
     "unlocked_weapons": ["knife", "pistol_silenced"],  # ВИПРАВЛЕНО: замінено "pistol" на "pistol_silenced"
-    "equipped_weapon": "pistol_silenced"  # ВИПРАВЛЕНО: замінено "pistol" на "pistol_silenced"
+    "equipped_weapon": "pistol_silenced",  # ВИПРАВЛЕНО: замінено "pistol" на "pistol_silenced"
+    "settings": {
+        "music_volume": 1.0,
+        "sfx_volume": 1.0
+    }
 }
 
 
@@ -39,6 +43,11 @@ class SaveManager:
 
                 if "skill_points" not in data:
                     data["skill_points"] = 0
+
+                # Захист від старих сейвів без налаштувань гучності
+                data.setdefault("settings", {})
+                for key, value in DEFAULT_DATA["settings"].items():
+                    data["settings"].setdefault(key, value)
 
                 # АВТОКОРЕКЦІЯ ДЛЯ СТАРИХ СЕЙВІВ:
                 # Перевіряємо та виправляємо екіпіровану зброю

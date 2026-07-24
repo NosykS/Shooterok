@@ -34,6 +34,10 @@ class InputHandler:
         if not mouse_click[0]:
             self._update_ui_button_actions(mouse_pos, (False, False, False))
 
+        # Слайдери гучності оновлюються щокадру незалежно від черги подій (щоб перетягування було плавним)
+        if self.game.game_state == "SETTINGS":
+            self._update_settings_sliders(mouse_pos)
+
     def _handle_playing_inputs(self, event):
         """Обробка гарячих клавіш керування безпосередньо під час ігрового процесу"""
         if event.type == pygame.KEYDOWN:
@@ -73,11 +77,18 @@ class InputHandler:
         """Обробка натискань клавіатури в інтерфейсах меню"""
         if event.type == pygame.KEYDOWN:
             if self.game.game_state == "MENU":
-                if event.key in [pygame.K_1, pygame.K_SPACE]:
+                if event.key == pygame.K_SPACE:
+                    current_level = self.game.profile_data.get("current_level", 1)
+                    self.game.missions.load_mission(current_level)
+                elif event.key == pygame.K_1:
                     self.game.missions.load_mission(1)
-                    self.game.game_state = "PLAYING"
                 elif event.key == pygame.K_ESCAPE:
                     self.game.running = False
+
+            elif self.game.game_state == "SETTINGS":
+                if event.key == pygame.K_ESCAPE:
+                    SaveManager.save_game(self.game.profile_data)
+                    self.game.game_state = self.game.settings_return_state
             elif self.game.game_state == "GAME_OVER":
                 if event.key == pygame.K_r:
                     self.game.levels.reset_game_world(new_map=False, new_level=False)
@@ -111,6 +122,19 @@ class InputHandler:
                 elif event.key in [pygame.K_m, pygame.K_ESCAPE]:
                     self.game.game_state = "MENU"
 
+    def _update_settings_sliders(self, mouse_pos):
+        """Оновлює слайдери гучності та одразу застосовує зміни до SoundManager"""
+        mouse_pressed = pygame.mouse.get_pressed()[0]
+        music_slider, sfx_slider = self.game.settings_sliders
+
+        music_slider.update(mouse_pos, mouse_pressed)
+        sfx_slider.update(mouse_pos, mouse_pressed)
+
+        self.game.sound.set_music_volume(music_slider.value)
+        self.game.sound.set_sfx_volume(sfx_slider.value)
+        self.game.profile_data["settings"]["music_volume"] = music_slider.value
+        self.game.profile_data["settings"]["sfx_volume"] = sfx_slider.value
+
     def _update_ui_button_actions(self, mouse_pos, mouse_click):
         """Обробка кліків миші по активних кнопках поточного стану графічного інтерфейсу"""
         active_buttons = []
@@ -126,6 +150,8 @@ class InputHandler:
             active_buttons = self.game.victory_all_buttons
         elif self.game.game_state == "SHOP":
             active_buttons = self.game.shop_buttons
+        elif self.game.game_state == "SETTINGS":
+            active_buttons = self.game.settings_buttons
 
         for btn in active_buttons:
             action = btn.update(mouse_pos, mouse_click)
@@ -133,12 +159,32 @@ class InputHandler:
                 continue
 
             # Базові ігрові стани
-            if action == "START":
+            if action == "NEW_GAME":
                 self.game.missions.load_mission(1)
                 self.game.game_state = "PLAYING"
                 # ГАРАНТОВАНИЙ ФІКС: скидаємо кулдаун відразу після старту
                 if hasattr(self.game, 'player') and self.game.player:
                     self.game.player.last_shot_time = pygame.time.get_ticks()
+
+            elif action == "CONTINUE_GAME":
+                current_level = self.game.profile_data.get("current_level", 1)
+                self.game.missions.load_mission(current_level)
+                if hasattr(self.game, 'player') and self.game.player:
+                    self.game.player.last_shot_time = pygame.time.get_ticks()
+
+            elif action == "OPEN_SETTINGS":
+                # Запам'ятовуємо, куди повертатись (головне меню чи пауза)
+                self.game.settings_return_state = self.game.game_state
+                self.game.game_state = "SETTINGS"
+
+            elif action == "SETTINGS_BACK":
+                SaveManager.save_game(self.game.profile_data)
+                self.game.game_state = self.game.settings_return_state
+
+            elif action == "SAVE_GAME":
+                SaveManager.save_game(self.game.profile_data)
+                self.game.save_feedback_timer = 90  # ~1.5с при 60 FPS
+                print("[SAVE] Гру збережено вручну.")
 
             elif action == "CONTINUE":
                 self.game.game_state = "PLAYING"

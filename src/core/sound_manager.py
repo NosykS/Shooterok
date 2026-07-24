@@ -42,7 +42,7 @@ class SoundManager:
     тихо вимикається (self.enabled = False), і гра продовжує працювати без звуку.
     """
 
-    def __init__(self):
+    def __init__(self, sfx_volume=1.0, music_volume=1.0):
         self.enabled = True
         try:
             if pygame.mixer.get_init() is None:
@@ -55,6 +55,10 @@ class SoundManager:
         self._music_state = "stopped"  # stopped | playing | paused
         self._footstep_toggle = False
 
+        # Множники гучності, які регулюються гравцем через екран налаштувань (0.0 - 1.0)
+        self.sfx_volume = max(0.0, min(1.0, sfx_volume))
+        self.music_volume = max(0.0, min(1.0, music_volume))
+
         if self.enabled:
             for key, rel_path in _SFX_FILES.items():
                 self._load_sfx(key, rel_path)
@@ -63,10 +67,22 @@ class SoundManager:
         path = os.path.join(SOUNDS_DIR, rel_path)
         try:
             sound = pygame.mixer.Sound(path)
-            sound.set_volume(_SFX_VOLUMES.get(key, 0.7))
+            sound.set_volume(_SFX_VOLUMES.get(key, 0.7) * self.sfx_volume)
             self.sfx[key] = sound
         except Exception as e:
             print(f"[SOUND] Не вдалося завантажити {path}: {e}")
+
+    def set_sfx_volume(self, value):
+        """Встановлює загальний множник гучності ефектів (0.0 - 1.0)"""
+        self.sfx_volume = max(0.0, min(1.0, value))
+        for key, sound in self.sfx.items():
+            sound.set_volume(_SFX_VOLUMES.get(key, 0.7) * self.sfx_volume)
+
+    def set_music_volume(self, value):
+        """Встановлює загальний множник гучності фонової музики (0.0 - 1.0)"""
+        self.music_volume = max(0.0, min(1.0, value))
+        if self.enabled:
+            pygame.mixer.music.set_volume(MUSIC_VOLUME * self.music_volume)
 
     def play(self, key):
         if not self.enabled:
@@ -83,7 +99,7 @@ class SoundManager:
         self._footstep_toggle = not self._footstep_toggle
         self.play("footstep1" if self._footstep_toggle else "footstep2")
 
-    def start_music(self, volume=MUSIC_VOLUME):
+    def start_music(self):
         """Запускає (або знімає з паузи) фонову музику. Викликається лише під час гри."""
         if not self.enabled or self._music_state == "playing":
             return
@@ -93,7 +109,7 @@ class SoundManager:
         else:
             try:
                 pygame.mixer.music.load(MUSIC_PATH)
-                pygame.mixer.music.set_volume(volume)
+                pygame.mixer.music.set_volume(MUSIC_VOLUME * self.music_volume)
                 pygame.mixer.music.play(loops=-1)
             except Exception as e:
                 print(f"[SOUND] Не вдалося завантажити фонову музику: {e}")

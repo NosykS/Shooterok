@@ -63,6 +63,46 @@ class UIButton:
         screen.blit(text_surf, text_rect)
 
 
+# Слайдер гучності (перетягування або клік по смузі)
+class UISlider:
+    def __init__(self, x, y, width, height, label, font, value=1.0):
+        self.rect = pygame.Rect(0, 0, width, height)
+        self.rect.center = (x, y)
+        self.label = label
+        self.font = font
+        self.value = max(0.0, min(1.0, value))
+        self.dragging = False
+
+    def update(self, mouse_pos, mouse_pressed):
+        """Викликається щокадру. mouse_pressed - стан лівої кнопки миші (pygame.mouse.get_pressed()[0])"""
+        hovered = self.rect.collidepoint(mouse_pos)
+
+        if mouse_pressed and (hovered or self.dragging):
+            self.dragging = True
+            rel = (mouse_pos[0] - self.rect.left) / self.rect.width
+            self.value = max(0.0, min(1.0, rel))
+        elif not mouse_pressed:
+            self.dragging = False
+
+    def draw(self, screen):
+        pygame.draw.rect(screen, (35, 40, 50), self.rect, border_radius=6)
+
+        fill_width = int(self.rect.width * self.value)
+        if fill_width > 0:
+            fill_rect = pygame.Rect(self.rect.left, self.rect.top, fill_width, self.rect.height)
+            pygame.draw.rect(screen, (0, 180, 255), fill_rect, border_radius=6)
+
+        pygame.draw.rect(screen, (255, 255, 255), self.rect, width=2, border_radius=6)
+
+        # Ручка повзунка
+        handle_x = self.rect.left + fill_width
+        pygame.draw.circle(screen, (255, 255, 255), (handle_x, self.rect.centery), self.rect.height // 2 + 3)
+        pygame.draw.circle(screen, (0, 180, 255), (handle_x, self.rect.centery), self.rect.height // 2)
+
+        label_surf = self.font.render(f"{self.label}: {int(self.value * 100)}%", True, (255, 255, 255))
+        screen.blit(label_surf, (self.rect.left, self.rect.top - 26))
+
+
 def draw_controls_help(screen, font_ui):
     """Малює підказки керування, використовуючи переданий шрифт гри"""
     controls = [
