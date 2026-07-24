@@ -27,6 +27,16 @@ class Camera:
         """
         return rect.move(self.camera_rect.topleft)
 
+    def screen_to_world(self, screen_pos) -> pygame.math.Vector2:
+        """
+        Переводить екранні координати (наприклад, позицію миші) у світові координати
+        з урахуванням поточного зміщення камери.
+        """
+        return pygame.math.Vector2(
+            screen_pos[0] - self.camera_rect.x,
+            screen_pos[1] - self.camera_rect.y
+        )
+
     def update(self, target):
         """
         Центрує камеру на об'єкті target (зазвичай це гравець).

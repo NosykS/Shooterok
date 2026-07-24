@@ -56,7 +56,6 @@ ENEMY_TYPES = {
 WEAPONS = {
     "knife": {
         "damage": 50,
-        "fire_rate": 250,
         "noise_radius": 0,
         "ammo_capacity": 0,
         "spread": 0,
@@ -65,7 +64,6 @@ WEAPONS = {
     },
     "pistol_silenced": {
         "damage": 60,
-        "fire_rate": 400,
         "noise_radius": 60,
         "ammo_capacity": 12,
         "spread": 3,
@@ -75,7 +73,6 @@ WEAPONS = {
     "rifle": {
         "damage": 40,
         "falloff": 0.998,
-        "fire_rate": 150,        # Стріляє дуже швидко
         "noise_radius": 350,     # Дуже гучна (привертає увагу половини карти)
         "ammo_capacity": 30,     # Великий магазин
         "spread": 6,             # Середня точність на відстані
@@ -85,7 +82,6 @@ WEAPONS = {
     "shotgun": {
         "damage": 20,
         "falloff": 0.982,# Шкода за ОДНУ дробину. Якщо влучать усі 8 -> урон буде 160!
-        "fire_rate": 600,
         "noise_radius": 400,
         "ammo_capacity": 6,
         "spread": 16,            # Кут розліту дробу (віяло)
@@ -103,9 +99,6 @@ PLAYER_NOISE_STEALTH = 0
 
 # Час у кадрах (FPS * секунди), через який ворог заспокоюється
 ENEMY_LOSE_INTEREST_TIME = 60 * 5 # 5 секунд при 60 FPS
-
-# Затримка реакції ворога (в кадрах). Поки що просто константа на майбутнє
-ENEMY_REACTION_TIME = 30
 
 # Місії типи та умови виконання
 MISSION_CONFIGS = {

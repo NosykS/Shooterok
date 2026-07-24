@@ -67,27 +67,7 @@ class InputHandler:
                 self.game.levels.reset_game_world(new_map=True, new_level=False)
                 self.game.missions.spawn_mission_objectives()
             elif event.key == pygame.K_e:
-                if self.game.player.is_hidden:
-                    # ВИХІД ЗІ СХОВАНКИ: Телепортуємо у безпечну точку виходу цього куща
-                    if hasattr(self.game.player, "current_hideout") and self.game.player.current_hideout:
-                        if hasattr(self.game.player.current_hideout, "exit_pos"):
-                            self.game.player.pos = pygame.math.Vector2(self.game.player.current_hideout.exit_pos)
-                        self.game.player.current_hideout = None
-
-                    self.game.player.is_hidden = False
-                    self.game.player.hitbox.center = self.game.player.pos
-                    self.game.player.rect.center = self.game.player.pos
-                    print("[STEALTH] Гравець вийшов у безпечну точку.")
-                else:
-                    # ВХІД У СХОВАНКУ: Шукаємо найближчий кущ
-                    hit_spot = pygame.sprite.spritecollideany(self.game.player, self.game.hiding_spots)
-                    if hit_spot:
-                        self.game.player.is_hidden = True
-                        self.game.player.current_hideout = hit_spot
-                        self.game.player.pos = pygame.math.Vector2(hit_spot.rect.center)
-                        self.game.player.hitbox.center = self.game.player.pos
-                        self.game.player.rect.center = self.game.player.pos
-                        print("[STEALTH] Гравець сховався.")
+                self.game.player.toggle_hiding_spot(self.game.hiding_spots)
 
     def _handle_menu_inputs(self, event):
         """Обробка натискань клавіатури в інтерфейсах меню"""
@@ -183,17 +163,11 @@ class InputHandler:
 
 
             elif action == "NEXT_MISSION":
-                # Перевіряємо, чи поточна місія була останньою (наприклад, 3-ю)
-                # Якщо у вашому MissionManager є загальна кількість місій, можна використовувати її,
-                # але зараз зафіксуємо перевірку на 3 місії:
-                if self.game.missions.current_mission_num >= 3:
-                    self.game.game_state = "VICTORY_ALL"
-                    print("[MISSIONS] Усі місії пройдені! Перехід на екран фіналу кампанії.")
-                else:
-                    self.game.missions.load_mission(self.game.missions.current_mission_num + 1)
-                    self.game.game_state = "PLAYING"
-                    if hasattr(self.game, 'player') and self.game.player:
-                        self.game.player.last_shot_time = pygame.time.get_ticks()
+                # MissionManager.load_mission сам визначає, чи це була остання місія,
+                # і виставляє відповідний game_state (PLAYING або VICTORY_ALL)
+                self.game.missions.load_mission(self.game.missions.current_mission_num + 1)
+                if self.game.game_state == "PLAYING" and hasattr(self.game, 'player') and self.game.player:
+                    self.game.player.last_shot_time = pygame.time.get_ticks()
             elif action == "MAIN_MENU":
                 self.game.game_state = "MENU"
             elif action == "QUIT":

@@ -19,10 +19,7 @@ class CrosshairController:
 
         if player.current_weapon == "knife":
             # Переводимо екранну позицію миші у світові координати
-            world_mouse = pygame.math.Vector2(
-                mouse_pos[0] - camera.camera_rect.x,
-                mouse_pos[1] - camera.camera_rect.y
-            )
+            world_mouse = camera.screen_to_world(mouse_pos)
 
             # Вектор від гравця до миші
             to_mouse = world_mouse - player.pos

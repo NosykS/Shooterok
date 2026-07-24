@@ -3,7 +3,7 @@ import pygame
 import random
 from src.settings import (
     SCREEN_WIDTH, SCREEN_HEIGHT, FPS, BG_COLOR,
-    WEAPONS, WORLD_WIDTH, WORLD_HEIGHT
+    WEAPONS, WORLD_WIDTH, WORLD_HEIGHT, ENEMY_LOSE_INTEREST_TIME
 )
 from src.core.ui import (
     draw_controls_help, draw_player_bars, draw_game_ui,
@@ -18,6 +18,7 @@ from src.core.input_handler import InputHandler
 from src.core.save_manager import SaveManager
 from src.core.progression_manager import ProgressionManager
 from src.core.shop_manager import ShopManager
+from src.core.sound_manager import SoundManager
 
 
 class Game:
@@ -45,6 +46,7 @@ class Game:
         self.game_matrix = None
 
         self.camera = Camera(WORLD_WIDTH, WORLD_HEIGHT)
+        self.sound = SoundManager()
 
         # Пам'ять карти
         self.saved_game_matrix = None
@@ -145,15 +147,10 @@ class Game:
 
     def execute_knife_attack(self):
         """Розрахунок сектору ураження ближнього бою гравця при використанні ножа"""
-        self.knife_attack_radius = WEAPONS["knife"].get("damage_radius", 60)
         self.knife_visual_timer = 6
         self.knife_visual_pos = (int(self.player.pos.x), int(self.player.pos.y))
 
-        mouse_pos = pygame.mouse.get_pos()
-        world_mouse = pygame.math.Vector2(mouse_pos[0] - self.camera.camera_rect.x,
-                                          mouse_pos[1] - self.camera.camera_rect.y)
-        player_to_mouse = world_mouse - self.player.pos
-        player_angle = player_to_mouse.as_polar()[1] if player_to_mouse.length() > 0 else 0
+        player_angle = self.player.angle_to_mouse(self.camera)
 
         for enemy in list(self.enemies):
             enemy_vec = enemy.pos - self.player.pos
@@ -175,11 +172,11 @@ class Game:
 
                     enemy.is_alerted = True
                     enemy.last_known_player_pos = pygame.math.Vector2(self.player.pos)
-                    from src.settings import ENEMY_LOSE_INTEREST_TIME
                     enemy.lose_interest_timer = ENEMY_LOSE_INTEREST_TIME
 
                     if enemy.hp <= 0:
                         enemy.kill()
+                        self.sound.play("enemy_death")
                         self.progression.add_xp(150)
                         self.shop.add_money(50)
 
@@ -190,12 +187,15 @@ class Game:
             attack_result = self.player.attack(self.camera)
 
             if attack_result == "melee":
+                self.sound.play_weapon("knife")
                 self.execute_knife_attack()
 
             elif attack_result:  # Очікуємо список [Bullet, Bullet, ...]
                 for bullet in attack_result:
                     self.all_sprites.add(bullet)
                     self.bullets.add(bullet)
+
+                self.sound.play_weapon(self.player.current_weapon)
 
                 weapon_stats = WEAPONS[self.player.current_weapon]
                 self.gunshot_visual_timer = 8
@@ -211,12 +211,12 @@ class Game:
             if enemy.pos.distance_to(self.player.pos) <= self.player.current_noise_radius:
                 enemy.is_alerted = True
                 enemy.last_known_player_pos = pygame.math.Vector2(self.player.pos)
-                from src.settings import ENEMY_LOSE_INTEREST_TIME
                 enemy.lose_interest_timer = ENEMY_LOSE_INTEREST_TIME
 
     def update(self):
         """Щокадрове оновлення станів ігрових об'єктів та обчислення логіки симуляції"""
         self.crosshair_ctrl.update(self.player, self.camera, self.knife_attack_radius, self.game_state)
+        self._sync_background_music()
 
         if self.game_state != "PLAYING":
             return
@@ -256,6 +256,7 @@ class Game:
                     continue
                 self.bullets.add(enemy.fired_bullet)
                 self.all_sprites.add(enemy.fired_bullet)
+                self.sound.play_weapon(enemy.weapon)
 
         self._check_environmental_sounds()
         self.collision_ctrl.handle_all_collisions()
@@ -265,6 +266,9 @@ class Game:
         self.missions.check_mission_conditions(self.frame_counter)
 
         if old_state == "PLAYING" and self.game_state in ["VICTORY", "VICTORY_ALL"]:
+            self.sound.play("victory_jingle")
+            self.sound.stop_music()
+
             mission_money = 300
             mission_xp = 500
 
@@ -276,6 +280,13 @@ class Game:
 
             SaveManager.save_game(self.profile_data)
             print(f"[SAVE] Автозбереження успішне! Нагорода: +{mission_money}$ | +{mission_xp} XP")
+
+    def _sync_background_music(self):
+        """Ненав'язлива фонова музика грає лише під час активного ігрового процесу"""
+        if self.game_state == "PLAYING":
+            self.sound.start_music()
+        elif self.sound.is_music_playing():
+            self.sound.pause_music()
 
     def draw(self):
         """Рендеринг графічних шарів із безпечним відображенням об'єктів"""

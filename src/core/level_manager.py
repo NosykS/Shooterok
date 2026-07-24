@@ -65,8 +65,8 @@ class LevelManager:
 
             # Переналаштовуємо камеру під нові розміри карти
             if hasattr(self.game, 'camera'):
-                self.game.camera.width = self.game.WORLD_WIDTH
-                self.game.camera.height = self.game.WORLD_HEIGHT
+                self.game.camera.map_width = self.game.WORLD_WIDTH
+                self.game.camera.map_height = self.game.WORLD_HEIGHT
 
         except Exception as e:
             print(f"[LEVEL_ERROR] Не вдалося завантажити карту {map_path}: {e}")

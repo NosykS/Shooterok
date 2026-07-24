@@ -18,10 +18,5 @@ class HidingSpot(pygame.sprite.Sprite):
         else:
             self.exit_pos = pygame.math.Vector2(self.rect.centerx + 45, self.rect.centery)
 
-        self.contained_entities = set()
-
-    def is_entity_hidden(self, entity) -> bool:
-        return self.rect.collidepoint(entity.rect.center)
-
     def update(self):
         pass

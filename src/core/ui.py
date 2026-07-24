@@ -169,14 +169,7 @@ def draw_gunshot_flash(screen, camera, position, radius, timer):
 
 def draw_knife_swing(screen, camera, player, attack_radius):
     """Розраховує та малює конус атаки бойовим ножем відповідно до миші"""
-    mouse_pos = pygame.mouse.get_pos()
-    world_mouse = pygame.math.Vector2(
-        mouse_pos[0] - camera.camera_rect.x,
-        mouse_pos[1] - camera.camera_rect.y
-    )
-
-    player_to_mouse = world_mouse - player.pos
-    player_angle = player_to_mouse.as_polar()[1] if player_to_mouse.length() > 0 else 0
+    player_angle = player.angle_to_mouse(camera)
 
     knife_surf = pygame.Surface((screen.get_width(), screen.get_height()), pygame.SRCALPHA)
     player_screen_pos = player.pos + pygame.math.Vector2(camera.camera_rect.topleft)

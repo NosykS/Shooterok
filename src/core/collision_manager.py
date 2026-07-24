@@ -37,7 +37,7 @@ class CollisionManager:
                             self.game.player.rect.center = (int(self.game.player.pos.x), int(self.game.player.pos.y))
 
                         if self.game.player.hp <= 0:
-                            self.game.game_state = "GAME_OVER"
+                            self._trigger_game_over()
                         print("Ворог штовхнув вас прикладом!")
 
     def _handle_bullets(self):
@@ -70,7 +70,16 @@ class CollisionManager:
                 self.game.player.armor = 0
         self.game.player.hp -= damage_to_deal
         if self.game.player.hp <= 0:
-            self.game.game_state = "GAME_OVER"
+            self._trigger_game_over()
+
+    def _trigger_game_over(self):
+        """Централізований перехід у стан поразки з відповідними звуками"""
+        if self.game.game_state == "GAME_OVER":
+            return
+        self.game.game_state = "GAME_OVER"
+        self.game.sound.play("player_death")
+        self.game.sound.play("defeat_jingle")
+        self.game.sound.stop_music()
 
     def _damage_enemy(self, enemy, damage):
         """Логіка нанесення шкоди ворогу з урахуванням його броні"""
@@ -89,6 +98,7 @@ class CollisionManager:
         enemy.lose_interest_timer = ENEMY_LOSE_INTEREST_TIME
         if enemy.hp <= 0:
             enemy.kill()
+            self.game.sound.play("enemy_death")
 
             # Нагорода за ліквідацію ворога з вогнепальної зброї
             self.game.progression.add_xp(100)

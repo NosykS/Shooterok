@@ -3,10 +3,10 @@ import pygame
 import random
 from src.settings import (
     WEAPONS, PLAYER_SPEED_NORMAL,
-    PLAYER_SPEED_STEALTH, PLAYER_NOISE_NORMAL, PLAYER_NOISE_STEALTH,
-    TILE_SIZE
+    PLAYER_SPEED_STEALTH, PLAYER_NOISE_NORMAL, PLAYER_NOISE_STEALTH
 )
 from src.objects.bullet import Bullet
+from src.core.physics import get_nearby_obstacles, resolve_axis_collision
 
 
 class Player(pygame.sprite.Sprite):
@@ -38,6 +38,7 @@ class Player(pygame.sprite.Sprite):
 
         self.current_noise_radius = 0
         self.is_hidden = False
+        self.footstep_timer = 0
 
         # Боєзапас
         self.weapons_ammo = {}
@@ -81,7 +82,6 @@ class Player(pygame.sprite.Sprite):
 
     @property
     def weapon_stats(self):
-        from src.settings import WEAPONS
         return WEAPONS.get(self._current_weapon, WEAPONS["knife"])
 
     @property
@@ -98,7 +98,8 @@ class Player(pygame.sprite.Sprite):
             self.current_noise_radius = 0
             return
 
-        if keys[pygame.K_LSHIFT]:
+        is_stealth = keys[pygame.K_LSHIFT]
+        if is_stealth:
             self.speed = self.base_speed * (PLAYER_SPEED_STEALTH / PLAYER_SPEED_NORMAL)
             base_noise = PLAYER_NOISE_STEALTH
         else:
@@ -115,38 +116,25 @@ class Player(pygame.sprite.Sprite):
             dx *= 0.7071
             dy *= 0.7071
 
-        if dx == 0 and dy == 0:
+        is_moving = dx != 0 or dy != 0
+
+        if not is_moving:
             self.current_noise_radius = max(0, self.current_noise_radius - 2)
         else:
             self.current_noise_radius = max(base_noise, self.current_noise_radius - 1)
 
-        nearby_obstacles = [
-            obs for obs in obstacles
-            if abs(obs.rect.centerx - self.pos.x) < TILE_SIZE * 2 and
-               abs(obs.rect.centery - self.pos.y) < TILE_SIZE * 2
-        ]
+        # Звук кроків лунає лише під час звичайної ходьби. Під час стелсу (LSHIFT) гравець рухається безшумно.
+        if is_moving and not is_stealth:
+            self.footstep_timer -= 1
+            if self.footstep_timer <= 0:
+                self.footstep_timer = 18  # ~0.3с між кроками при 60 FPS
+                self.game.sound.play_footstep()
+        else:
+            self.footstep_timer = 0
 
-        if dx != 0:
-            self.pos.x += dx
-            self.hitbox.centerx = self.pos.x
-            for obstacle in nearby_obstacles:
-                if self.hitbox.colliderect(obstacle.rect):
-                    if dx > 0:
-                        self.hitbox.right = obstacle.rect.left
-                    elif dx < 0:
-                        self.hitbox.left = obstacle.rect.right
-                    self.pos.x = self.hitbox.centerx
-
-        if dy != 0:
-            self.pos.y += dy
-            self.hitbox.centery = self.pos.y
-            for obstacle in nearby_obstacles:
-                if self.hitbox.colliderect(obstacle.rect):
-                    if dy > 0:
-                        self.hitbox.bottom = obstacle.rect.top
-                    elif dy < 0:
-                        self.hitbox.top = obstacle.rect.bottom
-                    self.pos.y = self.hitbox.centery
+        nearby_obstacles = get_nearby_obstacles(self.pos, obstacles)
+        resolve_axis_collision(self.pos, self.hitbox, nearby_obstacles, "x", dx)
+        resolve_axis_collision(self.pos, self.hitbox, nearby_obstacles, "y", dy)
 
         world_w = getattr(self.game, "WORLD_WIDTH", 2000)
         world_h = getattr(self.game, "WORLD_HEIGHT", 2000)
@@ -157,6 +145,12 @@ class Player(pygame.sprite.Sprite):
         if self.pos.y > world_h: self.pos.y = world_h
 
         self.hitbox.center = self.pos
+
+    def angle_to_mouse(self, camera):
+        """Кут (у градусах) від гравця до поточної позиції миші у світових координатах"""
+        world_mouse = camera.screen_to_world(pygame.mouse.get_pos())
+        to_mouse = world_mouse - self.pos
+        return to_mouse.as_polar()[1] if to_mouse.length() > 0 else 0
 
     def rotate_to_mouse(self, camera):
         if self.is_hidden: return
@@ -259,7 +253,6 @@ class Player(pygame.sprite.Sprite):
         self.rect.center = self.pos
 
     def refill_all_ammo(self):
-        from src.settings import WEAPONS
         for w_name, w_data in WEAPONS.items():
             self.weapons_ammo[w_name] = w_data.get("ammo_capacity", 0)
         print("[AMMO] Боєзапас успішно відновлено для всієї зброї!")

@@ -10,6 +10,7 @@ from src.settings import (
     WEAPONS, WORLD_WIDTH, WORLD_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT
 )
 from src.objects.bullet import Bullet
+from src.core.physics import get_nearby_obstacles, resolve_axis_collision
 
 
 class Enemy(pygame.sprite.Sprite):
@@ -302,35 +303,22 @@ class Enemy(pygame.sprite.Sprite):
                     self.patrol_points.append(fallback_pos)
 
     def move_with_collisions(self, velocity, obstacles):
-        """Переміщує ворога по осях X та Y, перевіряючи колізії зі стінами"""
+        """Переміщує ворога по осях X та Y, перевіряючи колізії зі стінами.
+
+        ОПТИМІЗАЦІЯ: замість перебору всіх obstacles на карті для кожного ворога
+        щокадру, спершу відфільтровуємо лише перешкоди поблизу (як і для гравця) —
+        це суттєво знижує навантаження при великій кількості ворогів/перешкод.
+        """
         if velocity.length() == 0:
             return
 
-        self.pos.x += velocity.x
-        self.rect.centerx = round(self.pos.x)
-        self.hitbox.centerx = self.rect.centerx
+        nearby_obstacles = get_nearby_obstacles(self.pos, obstacles)
 
-        for obstacle in obstacles:
-            if self.hitbox.colliderect(obstacle.rect):
-                if velocity.x > 0:
-                    self.hitbox.right = obstacle.rect.left
-                elif velocity.x < 0:
-                    self.hitbox.left = obstacle.rect.right
-                self.pos.x = self.hitbox.centerx
-                self.rect.centerx = self.hitbox.centerx
+        resolve_axis_collision(self.pos, self.hitbox, nearby_obstacles, "x", velocity.x)
+        self.rect.centerx = self.hitbox.centerx
 
-        self.pos.y += velocity.y
-        self.rect.centery = round(self.pos.y)
-        self.hitbox.centery = self.rect.centery
-
-        for obstacle in obstacles:
-            if self.hitbox.colliderect(obstacle.rect):
-                if velocity.y > 0:
-                    self.hitbox.bottom = obstacle.rect.top
-                elif velocity.y < 0:
-                    self.hitbox.top = obstacle.rect.bottom
-                self.pos.y = self.hitbox.centery
-                self.rect.centery = self.hitbox.centery
+        resolve_axis_collision(self.pos, self.hitbox, nearby_obstacles, "y", velocity.y)
+        self.rect.centery = self.hitbox.centery
 
     def update(self, player, game_matrix, obstacles):
         """Щокадрове оновлення поведінки ШІ, розрахунок стелс-станів, стрільби та пошуку шляху A*"""
