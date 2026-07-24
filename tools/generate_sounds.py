@@ -1,37 +1,40 @@
 # tools/generate_sounds.py
 """
-Одноразовий скрипт для процедурної генерації простих ретро звукових ефектів
-(у дусі Duke Nukem 3D — короткі, "хрусткі" 8/16-бітні семпли) та фонової музики
-для гри. Не використовує сторонніх залежностей (лише стандартна бібліотека),
-щоб не додавати нових пакетів у requirements.txt.
+One-off script that procedurally generates simple retro sound effects
+(Duke Nukem 3D style — short, "crunchy" 8/16-bit samples) and background
+music for the game. Uses no third-party dependencies (standard library only)
+so it doesn't add new packages to requirements.txt.
 
-Запуск: python tools/generate_sounds.py
-Результат: assets/sounds/*.wav
+Run: python tools/generate_sounds.py
+Output: assets/sounds/*.wav
 """
+import logging
 import math
 import os
 import random
 import struct
 import wave
 
+logger = logging.getLogger(__name__)
+
 SAMPLE_RATE = 22050
 OUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "sounds")
 
-NOTE_FREQS = {
+NOTE_FREQS: dict[str, float] = {
     "F3": 174.61, "G3": 196.00, "A3": 220.00, "B3": 246.94,
     "C4": 261.63, "D4": 293.66, "E4": 329.63, "F4": 349.23, "G4": 392.00,
     "A4": 440.00, "B4": 493.88, "C5": 523.25, "E5": 659.25, "G5": 783.99,
 }
 
 
-# --- Базові будівельні блоки синтезу ---
+# --- Basic synthesis building blocks ---
 
-def silence(duration):
+def silence(duration: float) -> list[float]:
     return [0.0] * int(SAMPLE_RATE * duration)
 
 
-def noise_burst(duration, decay=8.0, amp=1.0, seed=None):
-    """Шум з експоненційним загасанням — основа для пострілів/ударів."""
+def noise_burst(duration: float, decay: float = 8.0, amp: float = 1.0, seed: int | None = None) -> list[float]:
+    """Exponentially decaying noise — the base for gunshots/impacts."""
     n = int(SAMPLE_RATE * duration)
     rnd = random.Random(seed)
     out = []
@@ -42,8 +45,11 @@ def noise_burst(duration, decay=8.0, amp=1.0, seed=None):
     return out
 
 
-def tone(freq, duration, wave_type="sine", amp=1.0, decay=0.0, freq_end=None):
-    """Простий тон (sine/square/saw) з опційним загасанням та зміною частоти (glide)."""
+def tone(
+    freq: float, duration: float, wave_type: str = "sine", amp: float = 1.0,
+    decay: float = 0.0, freq_end: float | None = None,
+) -> list[float]:
+    """A simple tone (sine/square/saw) with optional decay and frequency glide."""
     n = int(SAMPLE_RATE * duration)
     out = []
     for i in range(n):
@@ -61,7 +67,7 @@ def tone(freq, duration, wave_type="sine", amp=1.0, decay=0.0, freq_end=None):
     return out
 
 
-def mix(*tracks):
+def mix(*tracks: list[float]) -> list[float]:
     length = max(len(t) for t in tracks)
     out = [0.0] * length
     for track in tracks:
@@ -70,21 +76,21 @@ def mix(*tracks):
     return out
 
 
-def concat(*tracks):
+def concat(*tracks: list[float]) -> list[float]:
     out = []
     for t in tracks:
         out.extend(t)
     return out
 
 
-def apply_fade_out(samples, fade_duration=0.02):
+def apply_fade_out(samples: list[float], fade_duration: float = 0.02) -> list[float]:
     n = min(int(SAMPLE_RATE * fade_duration), len(samples))
     for i in range(n):
         samples[-(i + 1)] *= (1 - i / n)
     return samples
 
 
-def normalize(samples, peak=0.9):
+def normalize(samples: list[float], peak: float = 0.9) -> list[float]:
     m = max((abs(s) for s in samples), default=0)
     if m == 0:
         return samples
@@ -92,7 +98,7 @@ def normalize(samples, peak=0.9):
     return [s * factor for s in samples]
 
 
-def write_wav(rel_path, samples):
+def write_wav(rel_path: str, samples: list[float]) -> None:
     path = os.path.join(OUT_DIR, rel_path)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     clamped = [max(-1.0, min(1.0, s)) for s in samples]
@@ -102,36 +108,36 @@ def write_wav(rel_path, samples):
         wf.setsampwidth(2)
         wf.setframerate(SAMPLE_RATE)
         wf.writeframes(frames)
-    print(f"[OK] {rel_path} ({len(samples) / SAMPLE_RATE:.2f}s)")
+    logger.info("[OK] %s (%.2fs)", rel_path, len(samples) / SAMPLE_RATE)
 
 
-def make_note(name, duration, wave_type="square", amp=0.35, decay=3.5):
+def make_note(name: str, duration: float, wave_type: str = "square", amp: float = 0.35, decay: float = 3.5) -> list[float]:
     return tone(NOTE_FREQS[name], duration, wave_type, amp=amp, decay=decay)
 
 
-# --- Звуки зброї ---
+# --- Weapon sounds ---
 
-def make_pistol_silenced():
+def make_pistol_silenced() -> list[float]:
     n = noise_burst(0.10, decay=35, amp=0.6, seed=1)
     t = tone(150, 0.08, "sine", amp=0.35, decay=20)
     return normalize(apply_fade_out(mix(n, t), 0.02), 0.7)
 
 
-def make_rifle():
+def make_rifle() -> list[float]:
     n1 = noise_burst(0.06, decay=25, amp=1.0, seed=2)
     crack = tone(90, 0.05, "square", amp=0.5, decay=30)
     tail = noise_burst(0.12, decay=12, amp=0.3, seed=3)
     return normalize(apply_fade_out(mix(n1, crack, tail), 0.03), 0.95)
 
 
-def make_shotgun():
+def make_shotgun() -> list[float]:
     n1 = noise_burst(0.18, decay=9, amp=1.0, seed=4)
     boom = tone(70, 0.15, "sine", amp=0.6, decay=10)
     boom2 = tone(55, 0.20, "square", amp=0.25, decay=8)
     return normalize(apply_fade_out(mix(n1, boom, boom2), 0.04), 1.0)
 
 
-def make_knife():
+def make_knife() -> list[float]:
     swish = noise_burst(0.12, decay=15, amp=0.5, seed=5)
     for i in range(len(swish)):
         t = i / SAMPLE_RATE
@@ -144,9 +150,9 @@ def make_knife():
     return normalize(apply_fade_out(concat(swish, thud), 0.02), 0.8)
 
 
-# --- Смерть гравця / ворога ---
+# --- Player / enemy death ---
 
-def make_player_death():
+def make_player_death() -> list[float]:
     groan = mix(
         tone(220, 0.5, "square", amp=0.35, decay=2.5, freq_end=80),
         tone(180, 0.5, "sine", amp=0.30, decay=2.0, freq_end=60),
@@ -156,7 +162,7 @@ def make_player_death():
     return normalize(apply_fade_out(concat(groan, thud), 0.05), 0.9)
 
 
-def make_enemy_death():
+def make_enemy_death() -> list[float]:
     bark = mix(
         tone(320, 0.25, "square", amp=0.4, decay=6, freq_end=140),
         noise_burst(0.2, decay=12, amp=0.3, seed=8),
@@ -164,9 +170,9 @@ def make_enemy_death():
     return normalize(apply_fade_out(bark, 0.03), 0.85)
 
 
-# --- Кроки ---
+# --- Footsteps ---
 
-def make_footstep(freq, seed):
+def make_footstep(freq: float, seed: int) -> list[float]:
     thud = mix(
         tone(freq, 0.07, "sine", amp=0.5, decay=35),
         noise_burst(0.05, decay=45, amp=0.25, seed=seed),
@@ -174,9 +180,9 @@ def make_footstep(freq, seed):
     return normalize(apply_fade_out(thud, 0.01), 0.5)
 
 
-# --- Мелодії програшу / перемоги ---
+# --- Victory / defeat jingles ---
 
-def make_defeat_jingle():
+def make_defeat_jingle() -> list[float]:
     seq = [("E4", 0.28), ("D4", 0.28), ("C4", 0.28), ("B3", 0.28), ("A3", 0.5), ("F3", 0.9)]
     parts = []
     for name, dur in seq:
@@ -185,7 +191,7 @@ def make_defeat_jingle():
     return normalize(apply_fade_out(concat(*parts), 0.08), 0.8)
 
 
-def make_victory_jingle():
+def make_victory_jingle() -> list[float]:
     seq = [("C4", 0.12), ("E4", 0.12), ("G4", 0.12), ("C5", 0.12), ("E5", 0.12)]
     parts = []
     for name, dur in seq:
@@ -199,13 +205,13 @@ def make_victory_jingle():
     return normalize(apply_fade_out(concat(*parts, chord), 0.08), 0.85)
 
 
-# --- Фонова музика (безшовний луп) ---
+# --- Background music (seamless loop) ---
 
-def make_ambient_loop(duration=8.0):
+def make_ambient_loop(duration: float = 8.0) -> list[float]:
     n = int(SAMPLE_RATE * duration)
     out = [0.0] * n
 
-    # Частоти підібрані кратними 1/duration Гц, щоб луп замикався без клацання
+    # Frequencies chosen as multiples of 1/duration Hz so the loop closes without a click
     pad_freqs = [110.0, 132.0, 165.0]
 
     for i in range(n):
@@ -225,7 +231,7 @@ def make_ambient_loop(duration=8.0):
     return normalize(out, 0.5)
 
 
-def main():
+def main() -> None:
     write_wav("weapons/knife.wav", make_knife())
     write_wav("weapons/pistol_silenced.wav", make_pistol_silenced())
     write_wav("weapons/rifle.wav", make_rifle())
@@ -242,8 +248,9 @@ def main():
 
     write_wav("music_ambient.wav", make_ambient_loop())
 
-    print("\nГотово! Усі звуки згенеровано в assets/sounds/")
+    logger.info("Done! All sounds generated in assets/sounds/")
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     main()

@@ -1,59 +1,60 @@
 # src/settings.py
-FPS = 60
+from typing import Any
 
-# Розмір одного тайла (клітинки мапи)
-TILE_SIZE = 32
-GRID_WIDTH = 40
-GRID_HEIGHT = 24
+FPS: int = 60
 
-SCREEN_WIDTH = GRID_WIDTH * TILE_SIZE   # 40 * 32 = 1280
-SCREEN_HEIGHT = GRID_HEIGHT * TILE_SIZE # 24 * 32 = 768
+# Size of a single map tile (grid cell)
+TILE_SIZE: int = 32
+GRID_WIDTH: int = 40
+GRID_HEIGHT: int = 24
 
-# РОЗМІР ВЕЛИКОГО ІГРОВОГО СВІТУ (Світ, по якому рухається камера)
-# Зробимо карту, наприклад, 100х100 або 80х60 клітинок
-WORLD_GRID_WIDTH = 90  # Клітинок в ширину (90 * 32 = 2880 пікселів)
-WORLD_GRID_HEIGHT = 60 # Клітинок в висоту (60 * 32 = 1920 пікселів)
+SCREEN_WIDTH: int = GRID_WIDTH * TILE_SIZE    # 40 * 32 = 1280
+SCREEN_HEIGHT: int = GRID_HEIGHT * TILE_SIZE  # 24 * 32 = 768
 
-WORLD_WIDTH = WORLD_GRID_WIDTH * TILE_SIZE
-WORLD_HEIGHT = WORLD_GRID_HEIGHT * TILE_SIZE
+# SIZE OF THE LARGE GAME WORLD (the world the camera scrolls across)
+WORLD_GRID_WIDTH: int = 90   # Tiles wide (90 * 32 = 2880 pixels)
+WORLD_GRID_HEIGHT: int = 60  # Tiles tall (60 * 32 = 1920 pixels)
 
-# Кольори
-BG_COLOR = (30, 30, 40)
-WHITE = (255, 255, 255)
+WORLD_WIDTH: int = WORLD_GRID_WIDTH * TILE_SIZE
+WORLD_HEIGHT: int = WORLD_GRID_HEIGHT * TILE_SIZE
 
-# Типи ворогів та їхні базові характеристики (Життя, Швидкість, Радіус огляду, Колір)
-ENEMY_TYPES = {
+# Colors
+BG_COLOR: tuple[int, int, int] = (30, 30, 40)
+WHITE: tuple[int, int, int] = (255, 255, 255)
+
+# Enemy types and their base stats (HP, speed, view radius, color)
+ENEMY_TYPES: dict[str, dict[str, Any]] = {
     "rookie": {
         "hp": 60,
-        "armor": 0,          # Без броні
+        "armor": 0,           # No armor
         "speed": 2.0,
         "view_radius": 200,
         "view_angle": 70,
         "color": (0, 200, 0),
-        "weapon": "pistol_silenced" # Стріляє слабше і рідше
+        "weapon": "pistol_silenced"  # Weaker, less frequent shots
     },
     "veteran": {
         "hp": 100,
-        "armor": 50,         # Середня броня
+        "armor": 50,          # Medium armor
         "speed": 2.5,
         "view_radius": 250,
         "view_angle": 80,
         "color": (200, 120, 0),
-        "weapon": "rifle"           # Озброєний гвинтівкою
+        "weapon": "rifle"            # Armed with a rifle
     },
     "commander": {
         "hp": 150,
-        "armor": 100,        # Важка броня
+        "armor": 100,         # Heavy armor
         "speed": 3.0,
         "view_radius": 300,
         "view_angle": 90,
         "color": (200, 0, 0),
-        "weapon": "rifle"           # Небезпечний штурмовик
+        "weapon": "rifle"            # Dangerous assault unit
     }
 }
 
-# Характеристики зброї (Шум в пікселях, Шкода, Кулдаун, Набої, Розліт)
-WEAPONS = {
+# Weapon stats (noise radius in pixels, damage, cooldown, ammo, spread)
+WEAPONS: dict[str, dict[str, Any]] = {
     "knife": {
         "damage": 50,
         "noise_radius": 0,
@@ -73,35 +74,35 @@ WEAPONS = {
     "rifle": {
         "damage": 40,
         "falloff": 0.998,
-        "noise_radius": 350,     # Дуже гучна (привертає увагу половини карти)
-        "ammo_capacity": 30,     # Великий магазин
-        "spread": 6,             # Середня точність на відстані
-        "bullet_speed": 18,      # Швидка куля
+        "noise_radius": 350,     # Very loud (attracts half the map's attention)
+        "ammo_capacity": 30,     # Large magazine
+        "spread": 6,             # Medium accuracy at range
+        "bullet_speed": 18,      # Fast bullet
         "shoot_cooldown": 150
     },
     "shotgun": {
         "damage": 20,
-        "falloff": 0.982,# Шкода за ОДНУ дробину. Якщо влучать усі 8 -> урон буде 160!
+        "falloff": 0.982,  # Damage per SINGLE pellet. If all 8 hit -> 160 damage!
         "noise_radius": 400,
         "ammo_capacity": 6,
-        "spread": 16,            # Кут розліту дробу (віяло)
+        "spread": 16,             # Pellet spread angle (fan pattern)
         "bullet_speed": 14,
         "shoot_cooldown": 600,
-        "pellets_count": 8       # Кількість дробин за один постріл
+        "pellets_count": 8        # Number of pellets fired per shot
     }
 }
 
-# Налаштування ходьби гравця
-PLAYER_SPEED_NORMAL = 5
-PLAYER_SPEED_STEALTH = 2
-PLAYER_NOISE_NORMAL = 100
-PLAYER_NOISE_STEALTH = 0
+# Player movement settings
+PLAYER_SPEED_NORMAL: int = 5
+PLAYER_SPEED_STEALTH: int = 2
+PLAYER_NOISE_NORMAL: int = 100
+PLAYER_NOISE_STEALTH: int = 0
 
-# Час у кадрах (FPS * секунди), через який ворог заспокоюється
-ENEMY_LOSE_INTEREST_TIME = 60 * 5 # 5 секунд при 60 FPS
+# Time in frames (FPS * seconds) before an enemy loses interest
+ENEMY_LOSE_INTEREST_TIME: int = 60 * 5  # 5 seconds at 60 FPS
 
-# Місії типи та умови виконання
-MISSION_CONFIGS = {
+# Mission types and completion conditions
+MISSION_CONFIGS: dict[int, dict[str, Any]] = {
     1: {
         "title": "Місія 1: Тихі кроки",
         "type": "STEALTH_ESCAPE",

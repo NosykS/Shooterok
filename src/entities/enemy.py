@@ -1,26 +1,32 @@
 # src/entities/enemy.py
-import pygame
 import math
 import random
+
+import pygame
 from pathfinding.core.grid import Grid
 from pathfinding.finder.a_star import AStarFinder
 from pathfinding.core.diagonal_movement import DiagonalMovement
+
 from src.settings import (
     ENEMY_TYPES, TILE_SIZE, ENEMY_LOSE_INTEREST_TIME,
-    WEAPONS, WORLD_WIDTH, WORLD_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT
+    WEAPONS, SCREEN_WIDTH, SCREEN_HEIGHT
 )
 from src.objects.bullet import Bullet
 from src.core.physics import get_nearby_obstacles, resolve_axis_collision
+from src.core.sprite_loader import load_character_sprite
 
 
 class Enemy(pygame.sprite.Sprite):
-    def __init__(self, x, y, enemy_type="rookie", game_matrix=None, custom_patrol=None):
-        """Ініціалізація сутності ворога, його базових характеристик, пресетів зброї та маршруту"""
+    def __init__(
+        self, x: float, y: float, enemy_type: str = "rookie",
+        game_matrix: list[list[int]] | None = None,
+        custom_patrol: list[tuple[float, float]] | None = None,
+    ) -> None:
         super().__init__()
         self.type = enemy_type
         self.stats = ENEMY_TYPES[enemy_type]
 
-        # Життєві показники та захист
+        # Vitals and defense
         self.hp = self.stats["hp"]
         self.max_hp = self.stats["hp"]
         self.speed = self.stats["speed"]
@@ -28,24 +34,23 @@ class Enemy(pygame.sprite.Sprite):
         self.armor = self.stats["armor"]
         self.max_armor = self.stats["armor"]
 
-        # Озброєння та бойові таймери
+        # Weapon and combat timers
         self.weapon = self.stats["weapon"]
         self.shoot_cooldown = 0
-        self.melee_cooldown = 0  # Внутрішній таймер кулдауну для атак ближнього бою
+        self.melee_cooldown = 0  # Internal melee attack cooldown timer
 
-        # Базові конфігураційні параметри зору
+        # Base vision configuration
         self.base_view_radius = self.stats["view_radius"]
         self.base_view_angle = self.stats["view_angle"]
 
-        # Динамічні поточні параметри зору (змінюються в стані тривоги)
+        # Current vision parameters (change while alerted)
         self.view_radius = self.base_view_radius
         self.view_angle = self.base_view_angle
 
-        # Завантаження справжнього спрайту ворога замість геометричної заглушки
         self.base_image = self._load_enemy_image()
         self.image = self.base_image.copy()
 
-        # Рівняємо початкову позицію ворога чітко по центру тайла спавну!
+        # Snap the initial spawn position to the center of its tile
         tile_x = int(x // TILE_SIZE)
         tile_y = int(y // TILE_SIZE)
         center_x = tile_x * TILE_SIZE + TILE_SIZE // 2
@@ -54,49 +59,44 @@ class Enemy(pygame.sprite.Sprite):
         self.pos = pygame.math.Vector2(center_x, center_y)
         self.rect = self.image.get_rect(center=self.pos)
 
-        # Зменшено розмір хітбоксу для більш гладкого проходу через двері та кути
+        # Smaller hitbox for smoother movement through doors and corners
         self.hitbox = pygame.Rect(0, 0, 18, 18)
         self.hitbox.center = self.pos
 
-        # Стартовий випадковий вектор повороту
         self.rotation_vector = pygame.math.Vector2(1, 0).rotate(random.randint(0, 360))
         self.is_alerted = False
 
-        # Система накопичення підозри (Стелс механіка)
-        self.suspicion = 0.0  # Поточний рівень від 0.0 (чисто) до 1.0 (тривога)
-        self.suspicion_speed = 1.5  # Множник швидкості накопичення підозри
-        self.cool_down_speed = 0.8  # Швидкість заспокоєння, коли гравець зник
+        # Suspicion meter (stealth mechanic): 0.0 (clean) to 1.0 (alerted)
+        self.suspicion = 0.0
+        self.suspicion_speed = 1.5   # Suspicion build-up rate multiplier
+        self.cool_down_speed = 0.8   # Suspicion decay rate once the player is gone
 
-        # Координати останньої фіксації цілі
-        self.last_known_player_pos = None
+        self.last_known_player_pos: pygame.math.Vector2 | None = None
         self.lose_interest_timer = ENEMY_LOSE_INTEREST_TIME
 
-        # Логіка патрулювання території
-        self.patrol_points = []
+        # Patrol route
+        self.patrol_points: list[pygame.math.Vector2] = []
         self.current_patrol_idx = 0
         self.patrol_wait_timer = 0
 
         if custom_patrol:
-            # Якщо передано готові координати маршруту
             for pt in custom_patrol:
                 self.patrol_points.append(pygame.math.Vector2(pt[0], pt[1]))
         elif game_matrix:
-            # Залишаємо генерацію як запасний варіант
             self.generate_patrol_route(game_matrix, center_x, center_y)
 
-        # Таймери та масив для пошуку шляхів алгоритмом A*
+        # A* pathfinding timers and buffer
         self.path_update_timer = random.randint(0, 15)
-        self.path = []
+        self.path: list[tuple[int, int]] = []
 
-        # Посилання на випущену кулю для передачі в ядро гри game.py
-        self.fired_bullet = None
+        # Bullet fired this frame, read by game.py
+        self.fired_bullet: Bullet | None = None
 
-        # Тимчасовий лічильник для пропуску перевірки зору
+        # Frame counter used to throttle line-of-sight checks
         self.raycast_timer = random.randint(0, 3)
 
-    def _load_enemy_image(self):
-        """Завантажує спрайт ворога з відповідної папки на основі його типу (rookie, veteran тощо)"""
-        # Розподіляємо скіни залежно від типу ворога
+    def _load_enemy_image(self) -> pygame.Surface:
+        """Loads the enemy sprite matching its type (rookie, veteran, etc.) and weapon."""
         if self.type == "rookie":
             folder_name = "Man Blue"
             prefix = "manBlue"
@@ -107,7 +107,6 @@ class Enemy(pygame.sprite.Sprite):
             folder_name = "Man Old"
             prefix = "manOld"
 
-        # Вибираємо суфікс залежно від типу озброєння ворога
         if "silenced" in self.weapon:
             suffix = "silencer"
         elif self.weapon in ["rifle", "shotgun"]:
@@ -117,19 +116,18 @@ class Enemy(pygame.sprite.Sprite):
 
         image_path = f"assets/images/{folder_name}/{prefix}_{suffix}.png"
 
-        try:
-            surface = pygame.image.load(image_path).convert_alpha()
-            return surface
-        except Exception as e:
-            print(f"[WARNING] Не вдалося завантажити спрайт ворога {image_path}: {e}. Використовуємо заглушку.")
-            # Запасний варіант, якщо файл не знайдено
-            surface = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA).convert_alpha()
-            pygame.draw.circle(surface, self.color, (TILE_SIZE // 2, TILE_SIZE // 2), TILE_SIZE // 2 - 2)
-            pygame.draw.line(surface, (0, 0, 0), (TILE_SIZE // 2, TILE_SIZE // 2), (TILE_SIZE, TILE_SIZE // 2), 3)
+        surface = load_character_sprite(image_path)
+        if surface is not None:
             return surface
 
-    def draw_health_bar(self, screen, camera):
-        """Відображення індикаторів здоров'я та броні ворога на екрані з урахуванням зміщення камери"""
+        # Fallback placeholder in case the sprite file is missing
+        surface = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA).convert_alpha()
+        pygame.draw.circle(surface, self.color, (TILE_SIZE // 2, TILE_SIZE // 2), TILE_SIZE // 2 - 2)
+        pygame.draw.line(surface, (0, 0, 0), (TILE_SIZE // 2, TILE_SIZE // 2), (TILE_SIZE, TILE_SIZE // 2), 3)
+        return surface
+
+    def draw_health_bar(self, screen: pygame.Surface, camera) -> None:
+        """Draws the enemy's HP/armor bars above its head, offset by the camera."""
         if self.hp <= 0:
             return
 
@@ -139,14 +137,14 @@ class Enemy(pygame.sprite.Sprite):
         bar_x = (self.pos.x + camera.camera_rect.x) - bar_width // 2
         bar_y = (self.pos.y + camera.camera_rect.y) - 30
 
-        # 1. Рендеринг смужки здоров'я (HP)
+        # 1. HP bar
         pygame.draw.rect(screen, (80, 0, 0), pygame.Rect(bar_x, bar_y, bar_width, bar_height))
         hp_pct = max(0, self.hp / self.max_hp)
         current_hp_width = int(bar_width * hp_pct)
         if current_hp_width > 0:
             pygame.draw.rect(screen, (0, 255, 100), pygame.Rect(bar_x, bar_y, current_hp_width, bar_height))
 
-        # 2. Рендеринг смужки броні (Shield)
+        # 2. Armor (shield) bar
         if self.max_armor > 0:
             armor_bar_height = 3
             armor_y = bar_y + bar_height + 1
@@ -157,8 +155,8 @@ class Enemy(pygame.sprite.Sprite):
                 pygame.draw.rect(screen, (0, 150, 255),
                                  pygame.Rect(bar_x, armor_y, current_armor_width, armor_bar_height))
 
-    def draw_suspicion_bar(self, screen, camera):
-        """Малює динамічний кольоровий індикатор рівня підозри над головою ворога під час виявлення"""
+    def draw_suspicion_bar(self, screen: pygame.Surface, camera) -> None:
+        """Draws the dynamic suspicion-level indicator above the enemy's head while unalerted."""
         if self.suspicion <= 0 or self.is_alerted:
             return
 
@@ -181,8 +179,8 @@ class Enemy(pygame.sprite.Sprite):
 
         pygame.draw.rect(screen, (0, 0, 0), pygame.Rect(bar_x, bar_y, bar_width, bar_height), 1)
 
-    def draw_vision_cone(self, screen, camera):
-        """Візуалізація полігонального сектора огляду ворога з урахуванням великого світу та камери"""
+    def draw_vision_cone(self, screen: pygame.Surface, camera) -> None:
+        """Draws the enemy's field-of-view cone, accounting for camera offset."""
         cone_color = (255, 0, 0, 40) if self.is_alerted else (0, 255, 0, 30)
 
         vision_surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
@@ -205,8 +203,8 @@ class Enemy(pygame.sprite.Sprite):
 
         screen.blit(vision_surface, (0, 0))
 
-    def check_for_player(self, player, obstacles):
-        """Перевіряє, чи знаходиться гравець у конусі зору ворога і чи немає між ними стін (Line of Sight)"""
+    def check_for_player(self, player, obstacles) -> bool:
+        """Checks whether the player is within the enemy's vision cone and not blocked by a wall (line of sight)."""
         enemy_to_player = player.pos - self.pos
         distance = enemy_to_player.length()
 
@@ -241,8 +239,8 @@ class Enemy(pygame.sprite.Sprite):
         self._last_los_result = True
         return True
 
-    def generate_patrol_route(self, game_matrix, start_x, start_y):
-        """Генерує чітко 3 досяжні точки патрулювання, перевіряючи їх через A* сітку"""
+    def generate_patrol_route(self, game_matrix: list[list[int]], start_x: float, start_y: float) -> None:
+        """Generates up to 3 reachable patrol points, verified reachable via the A* grid."""
         self.patrol_points = []
 
         start_vec = pygame.math.Vector2(start_x, start_y)
@@ -302,12 +300,12 @@ class Enemy(pygame.sprite.Sprite):
                 if all(p.distance_to(fallback_pos) > TILE_SIZE for p in self.patrol_points):
                     self.patrol_points.append(fallback_pos)
 
-    def move_with_collisions(self, velocity, obstacles):
-        """Переміщує ворога по осях X та Y, перевіряючи колізії зі стінами.
+    def move_with_collisions(self, velocity: pygame.math.Vector2, obstacles) -> None:
+        """Moves the enemy along both axes, resolving wall collisions.
 
-        ОПТИМІЗАЦІЯ: замість перебору всіх obstacles на карті для кожного ворога
-        щокадру, спершу відфільтровуємо лише перешкоди поблизу (як і для гравця) —
-        це суттєво знижує навантаження при великій кількості ворогів/перешкод.
+        Obstacles are pre-filtered to nearby ones only (as with the player) so
+        we don't check collisions against the whole map every frame for every
+        enemy — this matters a lot with many enemies/obstacles on screen.
         """
         if velocity.length() == 0:
             return
@@ -320,8 +318,8 @@ class Enemy(pygame.sprite.Sprite):
         resolve_axis_collision(self.pos, self.hitbox, nearby_obstacles, "y", velocity.y)
         self.rect.centery = self.hitbox.centery
 
-    def update(self, player, game_matrix, obstacles):
-        """Щокадрове оновлення поведінки ШІ, розрахунок стелс-станів, стрільби та пошуку шляху A*"""
+    def update(self, player, game_matrix: list[list[int]], obstacles) -> None:
+        """Per-frame AI update: stealth state, pathfinding, movement and shooting."""
         self.fired_bullet = None
         w_stats = WEAPONS[self.weapon]
 
@@ -330,7 +328,20 @@ class Enemy(pygame.sprite.Sprite):
             self._stuck_timer = 0
 
         can_see_player = self.check_for_player(player, obstacles)
+        self._update_alert_and_vision(player, can_see_player)
 
+        move_straight_to_player, target_pos = self._determine_target(player, obstacles, can_see_player)
+
+        if move_straight_to_player:
+            self._move_directly_to_player(player, obstacles, w_stats)
+        elif target_pos:
+            self._pursue_target(target_pos, game_matrix, obstacles)
+
+        self._update_stuck_timer(target_pos, move_straight_to_player)
+        self._update_sprite_facing()
+
+    def _update_alert_and_vision(self, player, can_see_player: bool) -> None:
+        """Updates suspicion, vision cone, and speed based on the current alert state."""
         if not self.is_alerted:
             self.view_radius = self.base_view_radius
             self.view_angle = self.base_view_angle
@@ -361,16 +372,18 @@ class Enemy(pygame.sprite.Sprite):
                 self.patrol_wait_timer = 0
                 self.path = []
 
+    def _determine_target(
+        self, player, obstacles, can_see_player: bool
+    ) -> tuple[bool, pygame.math.Vector2 | None]:
+        """Decides whether to chase the player directly or move toward a target position."""
         move_straight_to_player = False
         target_pos = None
 
         if self.is_alerted and can_see_player:
-            has_obstacle_between = False
-            for obstacle in obstacles:
-                if obstacle.rect.clipline(self.pos.x, self.pos.y, player.pos.x, player.pos.y):
-                    has_obstacle_between = True
-                    break
-
+            has_obstacle_between = any(
+                obstacle.rect.clipline(self.pos.x, self.pos.y, player.pos.x, player.pos.y)
+                for obstacle in obstacles
+            )
             if not has_obstacle_between:
                 move_straight_to_player = True
             else:
@@ -392,143 +405,162 @@ class Enemy(pygame.sprite.Sprite):
                 self.suspicion = 0.0
 
         if not self.is_alerted and self.patrol_points:
-            current_target = self.patrol_points[self.current_patrol_idx]
-            arrival_radius = TILE_SIZE * 0.8
+            target_pos = self._update_patrol()
 
-            if self.pos.distance_to(current_target) <= arrival_radius:
-                self.path = []
+        return move_straight_to_player, target_pos
 
-                direction_to_target = current_target - self.pos
-                if direction_to_target.length() > 0.5:
-                    self.pos += direction_to_target.normalize() * min(self.speed, direction_to_target.length())
-                    self.rect.center = self.pos
-                    self.hitbox.center = self.pos
+    def _update_patrol(self) -> pygame.math.Vector2 | None:
+        """Advances patrol waypoint arrival/waiting and stuck detection. Returns the movement target, if any."""
+        current_target = self.patrol_points[self.current_patrol_idx]
+        arrival_radius = TILE_SIZE * 0.8
 
-                if self.patrol_wait_timer == 0:
-                    self.patrol_wait_timer = 90
+        if self.pos.distance_to(current_target) <= arrival_radius:
+            self.path = []
 
-                self.patrol_wait_timer -= 1
-                if self.patrol_wait_timer <= 0:
-                    self.current_patrol_idx = (self.current_patrol_idx + 1) % len(self.patrol_points)
-                    self.patrol_wait_timer = 0
-            else:
-                target_pos = current_target
+            direction_to_target = current_target - self.pos
+            if direction_to_target.length() > 0.5:
+                self.pos += direction_to_target.normalize() * min(self.speed, direction_to_target.length())
+                self.rect.center = self.pos
+                self.hitbox.center = self.pos
 
-                if not hasattr(self, "_patrol_stuck_timer"):
-                    self._patrol_stuck_timer = 0
-                    self._last_patrol_pos = pygame.math.Vector2(self.pos)
+            if self.patrol_wait_timer == 0:
+                self.patrol_wait_timer = 90
 
-                if self.pos.distance_to(self._last_patrol_pos) < 0.3:
-                    self._patrol_stuck_timer += 1
-                    if self._patrol_stuck_timer > 90:
-                        self.current_patrol_idx = (self.current_patrol_idx + 1) % len(self.patrol_points)
-                        self._patrol_stuck_timer = 0
-                else:
-                    self._last_patrol_pos = pygame.math.Vector2(self.pos)
-                    self._patrol_stuck_timer = 0
+            self.patrol_wait_timer -= 1
+            if self.patrol_wait_timer <= 0:
+                self.current_patrol_idx = (self.current_patrol_idx + 1) % len(self.patrol_points)
+                self.patrol_wait_timer = 0
+            return None
 
-        if move_straight_to_player:
-            direction = player.pos - self.pos
+        target_pos = current_target
+
+        if not hasattr(self, "_patrol_stuck_timer"):
+            self._patrol_stuck_timer = 0
+            self._last_patrol_pos = pygame.math.Vector2(self.pos)
+
+        if self.pos.distance_to(self._last_patrol_pos) < 0.3:
+            self._patrol_stuck_timer += 1
+            if self._patrol_stuck_timer > 90:
+                self.current_patrol_idx = (self.current_patrol_idx + 1) % len(self.patrol_points)
+                self._patrol_stuck_timer = 0
+        else:
+            self._last_patrol_pos = pygame.math.Vector2(self.pos)
+            self._patrol_stuck_timer = 0
+
+        return target_pos
+
+    def _move_directly_to_player(self, player, obstacles, w_stats: dict) -> None:
+        """Chases and shoots at the player when there's a clear line of sight."""
+        direction = player.pos - self.pos
+        if direction.length() > 0:
+            self.rotation_vector = direction.normalize()
+            velocity = self.rotation_vector * self.speed
+            self.move_with_collisions(velocity, obstacles)
+
+        if self.shoot_cooldown > 0:
+            self.shoot_cooldown -= 1
+        else:
+            _, angle = direction.as_polar()
+            spread_val = w_stats.get("spread", 5)
+            angle += random.uniform(-spread_val, spread_val)
+
+            self.fired_bullet = Bullet(
+                self.pos.x, self.pos.y, angle,
+                w_stats["damage"], w_stats["bullet_speed"], True
+            )
+            self.shoot_cooldown = w_stats["shoot_cooldown"] // 16
+
+    def _pursue_target(self, target_pos: pygame.math.Vector2, game_matrix: list[list[int]], obstacles) -> None:
+        """Moves toward a target position (last known player position or a patrol point) via A*."""
+        if self.shoot_cooldown > 0:
+            self.shoot_cooldown -= 1
+
+        max_grid_x = len(game_matrix[0]) - 1
+        max_grid_y = len(game_matrix) - 1
+
+        start_x = max(0, min(int(self.pos.x // TILE_SIZE), max_grid_x))
+        start_y = max(0, min(int(self.pos.y // TILE_SIZE), max_grid_y))
+        end_x = max(0, min(int(target_pos.x // TILE_SIZE), max_grid_x))
+        end_y = max(0, min(int(target_pos.y // TILE_SIZE), max_grid_y))
+
+        can_move_direct = not any(
+            obstacle.rect.clipline(self.pos.x, self.pos.y, target_pos.x, target_pos.y)
+            for obstacle in obstacles
+        )
+
+        if not can_move_direct and not self.path:
+            self.path_update_timer = 0
+
+        self.path_update_timer -= 1
+
+        if self.path_update_timer <= 0 or not self.path:
+            self.path_update_timer = 30
+
+            inverted_matrix = [[1 if cell == 0 else 0 for cell in row] for row in game_matrix]
+            grid = Grid(matrix=inverted_matrix)
+
+            if grid.walkable(start_x, start_y) and grid.walkable(end_x, end_y):
+                start_node = grid.node(start_x, start_y)
+                end_node = grid.node(end_x, end_y)
+
+                finder = AStarFinder(diagonal_movement=DiagonalMovement.never)
+                self.path, _ = finder.find_path(start_node, end_node, grid)
+                if len(self.path) > 0:
+                    self.path.pop(0)
+
+        if self.path:
+            self._follow_path(obstacles)
+        elif can_move_direct or self.is_alerted:
+            direction = target_pos - self.pos
             if direction.length() > 0:
                 self.rotation_vector = direction.normalize()
                 velocity = self.rotation_vector * self.speed
                 self.move_with_collisions(velocity, obstacles)
 
-            if self.shoot_cooldown > 0:
-                self.shoot_cooldown -= 1
-            else:
-                _, angle = direction.as_polar()
-                spread_val = w_stats.get("spread", 5)
-                angle += random.uniform(-spread_val, spread_val)
+    def _follow_path(self, obstacles) -> None:
+        """Advances one step along the current A* path."""
+        target_grid_x, target_grid_y = self.path[0]
+        target_pixel_x = target_grid_x * TILE_SIZE + TILE_SIZE // 2
+        target_pixel_y = target_grid_y * TILE_SIZE + TILE_SIZE // 2
 
-                self.fired_bullet = Bullet(
-                    self.pos.x, self.pos.y, angle,
-                    w_stats["damage"], w_stats["bullet_speed"], True
-                )
-                self.shoot_cooldown = w_stats["shoot_cooldown"] // 16
+        move_target = pygame.math.Vector2(target_pixel_x, target_pixel_y)
+        direction = move_target - self.pos
 
-        elif target_pos:
-            if self.shoot_cooldown > 0:
-                self.shoot_cooldown -= 1
+        if direction.length() <= self.speed:
+            self.pos = move_target
+            self.rect.center = self.pos
+            self.hitbox.center = self.pos
+            self.path.pop(0)
+        else:
+            self.rotation_vector = direction.normalize()
+            velocity = self.rotation_vector * self.speed
 
-            max_grid_x = len(game_matrix[0]) - 1
-            max_grid_y = len(game_matrix) - 1
+            old_pos = pygame.math.Vector2(self.pos)
+            self.move_with_collisions(velocity, obstacles)
 
-            start_x = max(0, min(int(self.pos.x // TILE_SIZE), max_grid_x))
-            start_y = max(0, min(int(self.pos.y // TILE_SIZE), max_grid_y))
-            end_x = max(0, min(int(target_pos.x // TILE_SIZE), max_grid_x))
-            end_y = max(0, min(int(target_pos.y // TILE_SIZE), max_grid_y))
+            if self.pos.distance_to(old_pos) < 0.05:
+                self.path = []
 
-            can_move_direct = True
-            for obstacle in obstacles:
-                if obstacle.rect.clipline(self.pos.x, self.pos.y, target_pos.x, target_pos.y):
-                    can_move_direct = False
-                    break
+    def _update_stuck_timer(self, target_pos: pygame.math.Vector2 | None, move_straight_to_player: bool) -> None:
+        """Detects when the enemy hasn't moved for a while and forces it to pick a new target."""
+        if not (target_pos or move_straight_to_player):
+            return
 
-            if not can_move_direct and not self.path:
-                self.path_update_timer = 0
-
-            self.path_update_timer -= 1
-
-            if self.path_update_timer <= 0 or not self.path:
-                self.path_update_timer = 30
-
-                inverted_matrix = [[1 if cell == 0 else 0 for cell in row] for row in game_matrix]
-                grid = Grid(matrix=inverted_matrix)
-
-                if grid.walkable(start_x, start_y) and grid.walkable(end_x, end_y):
-                    start_node = grid.node(start_x, start_y)
-                    end_node = grid.node(end_x, end_y)
-
-                    finder = AStarFinder(diagonal_movement=DiagonalMovement.never)
-                    self.path, _ = finder.find_path(start_node, end_node, grid)
-                    if len(self.path) > 0:
-                        self.path.pop(0)
-
-            if self.path:
-                target_grid_x, target_grid_y = self.path[0]
-                target_pixel_x = target_grid_x * TILE_SIZE + TILE_SIZE // 2
-                target_pixel_y = target_grid_y * TILE_SIZE + TILE_SIZE // 2
-
-                move_target = pygame.math.Vector2(target_pixel_x, target_pixel_y)
-                direction = move_target - self.pos
-
-                if direction.length() <= self.speed:
-                    self.pos = move_target
-                    self.rect.center = self.pos
-                    self.hitbox.center = self.pos
-                    self.path.pop(0)
-                else:
-                    self.rotation_vector = direction.normalize()
-                    velocity = self.rotation_vector * self.speed
-
-                    old_pos = pygame.math.Vector2(self.pos)
-                    self.move_with_collisions(velocity, obstacles)
-
-                    if self.pos.distance_to(old_pos) < 0.05:
-                        self.path = []
-            elif can_move_direct or self.is_alerted:
-                direction = target_pos - self.pos
-                if direction.length() > 0:
-                    self.rotation_vector = direction.normalize()
-                    velocity = self.rotation_vector * self.speed
-                    self.move_with_collisions(velocity, obstacles)
-
-        if target_pos or move_straight_to_player:
-            if self.pos.distance_to(self._stuck_check_pos) < 0.5:
-                self._stuck_timer += 1
-                if self._stuck_timer > 60:
-                    self.path = []
-                    if not self.is_alerted and self.patrol_points:
-                        self.current_patrol_idx = (self.current_patrol_idx + 1) % len(self.patrol_points)
-                    elif self.is_alerted:
-                        self.last_known_player_pos = None
-                    self._stuck_timer = 0
-            else:
-                self._stuck_check_pos = pygame.math.Vector2(self.pos)
+        if self.pos.distance_to(self._stuck_check_pos) < 0.5:
+            self._stuck_timer += 1
+            if self._stuck_timer > 60:
+                self.path = []
+                if not self.is_alerted and self.patrol_points:
+                    self.current_patrol_idx = (self.current_patrol_idx + 1) % len(self.patrol_points)
+                elif self.is_alerted:
+                    self.last_known_player_pos = None
                 self._stuck_timer = 0
+        else:
+            self._stuck_check_pos = pygame.math.Vector2(self.pos)
+            self._stuck_timer = 0
 
-        # Оновлення графічного повороту спрайту ворога у бік руху/цілі
+    def _update_sprite_facing(self) -> None:
+        """Rotates the sprite to face the current movement/target direction."""
         _, angle = self.rotation_vector.as_polar()
         self.image = pygame.transform.rotate(self.base_image, -angle)
         self.rect = self.image.get_rect(center=self.pos)

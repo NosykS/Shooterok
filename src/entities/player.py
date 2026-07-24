@@ -1,23 +1,28 @@
 # src/entities/player.py
-import pygame
+import logging
 import random
+
+import pygame
+
 from src.settings import (
     WEAPONS, PLAYER_SPEED_NORMAL,
     PLAYER_SPEED_STEALTH, PLAYER_NOISE_NORMAL, PLAYER_NOISE_STEALTH
 )
 from src.objects.bullet import Bullet
 from src.core.physics import get_nearby_obstacles, resolve_axis_collision
+from src.core.sprite_loader import load_character_sprite
+
+logger = logging.getLogger(__name__)
 
 
 class Player(pygame.sprite.Sprite):
-    def __init__(self, game, x, y):
+    def __init__(self, game, x: float, y: float) -> None:
         super().__init__()
         self.game = game
 
-        # Ініціалізація зброї першочергово, щоб знати яку картинку завантажити
-        self._current_weapon = self.game.profile_data.get("equipped_weapon", "pistol_silenced")
+        # Load the weapon first so we know which sprite variant to load
+        self._current_weapon: str = self.game.profile_data.get("equipped_weapon", "pistol_silenced")
 
-        # Завантажуємо спрайт гравця замість геометричної заглушки
         self.base_image = self._load_player_image()
         self.image = self.base_image.copy()
 
@@ -32,7 +37,7 @@ class Player(pygame.sprite.Sprite):
         self.hitbox = pygame.Rect(0, 0, 32, 32)
         self.hitbox.center = self.pos
 
-        # СТЕЛС ТА ШВИДКІСТЬ
+        # STEALTH AND SPEED
         self.base_speed = PLAYER_SPEED_NORMAL
         self.speed = self.base_speed
 
@@ -40,20 +45,19 @@ class Player(pygame.sprite.Sprite):
         self.is_hidden = False
         self.footstep_timer = 0
 
-        # Боєзапас
-        self.weapons_ammo = {}
+        # Ammo
+        self.weapons_ammo: dict[str, int] = {}
         for w_name, w_data in WEAPONS.items():
             self.weapons_ammo[w_name] = w_data.get("ammo_capacity", 0)
 
         self.last_shot_time = pygame.time.get_ticks()
         self.refill_all_ammo()
 
-    def _load_player_image(self):
-        """Завантажує спрайт гравця з папки 'Hitman 1' залежно від обраної зброї"""
+    def _load_player_image(self) -> pygame.Surface:
+        """Loads the player sprite from the 'Hitman 1' folder based on the equipped weapon."""
         folder_name = "Hitman 1"
         character_prefix = "hitman1"
 
-        # Вибираємо суфікс залежно від поточної зброї
         if self._current_weapon == "knife":
             suffix = "hold"
         elif "silenced" in self._current_weapon:
@@ -65,35 +69,34 @@ class Player(pygame.sprite.Sprite):
 
         image_path = f"assets/images/{folder_name}/{character_prefix}_{suffix}.png"
 
-        try:
-            surface = pygame.image.load(image_path).convert_alpha()
-            return surface
-        except Exception as e:
-            print(f"[WARNING] Не вдалося завантажити спрайт гравця {image_path}: {e}. Використовуємо заглушку.")
-            # Запасний варіант на випадок збою
-            surface = pygame.Surface((50, 50), pygame.SRCALPHA).convert_alpha()
-            pygame.draw.circle(surface, (0, 128, 255), (25, 25), 20)
-            pygame.draw.line(surface, (255, 0, 0), (25, 25), (50, 25), 4)
+        surface = load_character_sprite(image_path)
+        if surface is not None:
             return surface
 
+        # Fallback placeholder in case the sprite file is missing
+        surface = pygame.Surface((50, 50), pygame.SRCALPHA).convert_alpha()
+        pygame.draw.circle(surface, (0, 128, 255), (25, 25), 20)
+        pygame.draw.line(surface, (255, 0, 0), (25, 25), (50, 25), 4)
+        return surface
+
     @property
-    def current_weapon(self):
+    def current_weapon(self) -> str:
         return self._current_weapon
 
     @property
-    def weapon_stats(self):
+    def weapon_stats(self) -> dict:
         return WEAPONS.get(self._current_weapon, WEAPONS["knife"])
 
     @property
-    def ammo(self):
+    def ammo(self) -> int:
         return self.weapons_ammo.get(self.current_weapon, 0)
 
     @ammo.setter
-    def ammo(self, value):
+    def ammo(self, value: int) -> None:
         if self.current_weapon in self.weapons_ammo:
             self.weapons_ammo[self.current_weapon] = value
 
-    def handle_movement(self, keys, obstacles):
+    def handle_movement(self, keys, obstacles) -> None:
         if self.is_hidden:
             self.current_noise_radius = 0
             return
@@ -123,11 +126,11 @@ class Player(pygame.sprite.Sprite):
         else:
             self.current_noise_radius = max(base_noise, self.current_noise_radius - 1)
 
-        # Звук кроків лунає лише під час звичайної ходьби. Під час стелсу (LSHIFT) гравець рухається безшумно.
+        # Footsteps only play during normal walking; stealth (LSHIFT) is silent.
         if is_moving and not is_stealth:
             self.footstep_timer -= 1
             if self.footstep_timer <= 0:
-                self.footstep_timer = 18  # ~0.3с між кроками при 60 FPS
+                self.footstep_timer = 18  # ~0.3s between steps at 60 FPS
                 self.game.sound.play_footstep()
         else:
             self.footstep_timer = 0
@@ -146,14 +149,15 @@ class Player(pygame.sprite.Sprite):
 
         self.hitbox.center = self.pos
 
-    def angle_to_mouse(self, camera):
-        """Кут (у градусах) від гравця до поточної позиції миші у світових координатах"""
+    def angle_to_mouse(self, camera) -> float:
+        """Angle (in degrees) from the player to the current mouse position in world space."""
         world_mouse = camera.screen_to_world(pygame.mouse.get_pos())
         to_mouse = world_mouse - self.pos
         return to_mouse.as_polar()[1] if to_mouse.length() > 0 else 0
 
-    def rotate_to_mouse(self, camera):
-        if self.is_hidden: return
+    def rotate_to_mouse(self, camera) -> None:
+        if self.is_hidden:
+            return
 
         mouse_x, mouse_y = pygame.mouse.get_pos()
         world_mouse_x = mouse_x - camera.camera_rect.x
@@ -166,7 +170,7 @@ class Player(pygame.sprite.Sprite):
             self.image = pygame.transform.rotate(self.base_image, angle)
             self.rect = self.image.get_rect(center=self.pos)
 
-    def change_weapon(self, index):
+    def change_weapon(self, index: int) -> None:
         unlocked = self.game.profile_data["unlocked_weapons"]
 
         if 0 <= index < len(unlocked):
@@ -176,14 +180,17 @@ class Player(pygame.sprite.Sprite):
             self.game.profile_data["equipped_weapon"] = weapon_name
             self.shoot_cooldown_timer = 0
 
-            # Оновлюємо спрайт під нову зброю
+            # Update the sprite to match the new weapon
             self.base_image = self._load_player_image()
             self.image = self.base_image.copy()
 
             stats = self.weapon_stats
-            print(f"[WEAPON] Увімкнено: {weapon_name} | Шкода: {stats['damage']} | Кулдаун: {stats['shoot_cooldown']}")
+            logger.info(
+                "Weapon equipped: %s | Damage: %s | Cooldown: %s",
+                weapon_name, stats["damage"], stats["shoot_cooldown"]
+            )
 
-    def attack(self, camera):
+    def attack(self, camera) -> str | list[Bullet] | None:
         if self.is_hidden:
             return None
 
@@ -247,17 +254,17 @@ class Player(pygame.sprite.Sprite):
 
         return None
 
-    def update(self, keys, obstacles, camera):
+    def update(self, keys, obstacles, camera) -> None:
         self.handle_movement(keys, obstacles)
         self.rotate_to_mouse(camera)
         self.rect.center = self.pos
 
-    def refill_all_ammo(self):
+    def refill_all_ammo(self) -> None:
         for w_name, w_data in WEAPONS.items():
             self.weapons_ammo[w_name] = w_data.get("ammo_capacity", 0)
-        print("[AMMO] Боєзапас успішно відновлено для всієї зброї!")
+        logger.info("Ammo replenished for all weapons.")
 
-    def toggle_hiding_spot(self, hiding_spots_group):
+    def toggle_hiding_spot(self, hiding_spots_group: pygame.sprite.Group) -> None:
         if self.is_hidden:
             if hasattr(self, "current_hideout") and self.current_hideout:
                 if hasattr(self.current_hideout, "exit_pos"):
@@ -267,7 +274,7 @@ class Player(pygame.sprite.Sprite):
             self.is_hidden = False
             self.hitbox.center = self.pos
             self.rect.center = self.pos
-            print("[STEALTH] Гравець вийшов зі схованки у безпечну точку.")
+            logger.info("Player left cover at a safe point.")
         else:
             hit_spot = pygame.sprite.spritecollideany(self, hiding_spots_group)
             if hit_spot:
@@ -276,4 +283,4 @@ class Player(pygame.sprite.Sprite):
                 self.pos = pygame.math.Vector2(hit_spot.rect.center)
                 self.hitbox.center = self.pos
                 self.rect.center = self.pos
-                print("[STEALTH] Гравець сховався в кущ.")
+                logger.info("Player hid in a bush.")

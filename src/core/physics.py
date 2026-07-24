@@ -1,11 +1,19 @@
 # src/core/physics.py
+from typing import Iterable, Literal
+
+import pygame
+
 from src.settings import TILE_SIZE
 
 
-def get_nearby_obstacles(pos, obstacles, radius=TILE_SIZE * 2):
+def get_nearby_obstacles(
+    pos: pygame.math.Vector2,
+    obstacles: Iterable[pygame.sprite.Sprite],
+    radius: float = TILE_SIZE * 2,
+) -> list[pygame.sprite.Sprite]:
     """
-    Фільтрує перешкоди поблизу позиції, щоб не перевіряти колізії з усією картою
-    на кожному кадрі для кожної сутності (гравця чи ворога).
+    Filters obstacles near a position so collisions aren't checked against the
+    whole map every frame for every entity (player or enemy).
     """
     return [
         obs for obs in obstacles
@@ -13,11 +21,18 @@ def get_nearby_obstacles(pos, obstacles, radius=TILE_SIZE * 2):
     ]
 
 
-def resolve_axis_collision(pos, hitbox, obstacles, axis, delta):
+def resolve_axis_collision(
+    pos: pygame.math.Vector2,
+    hitbox: pygame.Rect,
+    obstacles: Iterable[pygame.sprite.Sprite],
+    axis: Literal["x", "y"],
+    delta: float,
+) -> None:
     """
-    Зсуває позицію та hitbox сутності по одній осі ('x' або 'y') на delta пікселів
-    і відкочує рух назад до межі стіни при колізії з перешкодою зі списку obstacles.
-    Список obstacles очікується вже відфільтрованим (див. get_nearby_obstacles).
+    Shifts an entity's position and hitbox along one axis ('x' or 'y') by delta
+    pixels and rolls the movement back to the wall boundary on collision with
+    an obstacle from the given list. The obstacle list is expected to already
+    be filtered (see get_nearby_obstacles).
     """
     if delta == 0:
         return

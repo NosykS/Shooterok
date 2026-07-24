@@ -1,18 +1,24 @@
 # src/core/collision_manager.py
+import logging
+
 import pygame
+
 from src.settings import ENEMY_LOSE_INTEREST_TIME
 
+logger = logging.getLogger(__name__)
+
+
 class CollisionManager:
-    def __init__(self, game):
+    def __init__(self, game) -> None:
         self.game = game
 
-    def handle_all_collisions(self):
-        """Головний менеджер фізичних та логічних колізій на сцені"""
+    def handle_all_collisions(self) -> None:
+        """Main entry point for all physical and logical collisions in the scene."""
         self._handle_enemy_melee()
         self._handle_bullets()
 
-    def _handle_enemy_melee(self):
-        """Обробка ударів впритул з боку ворогів"""
+    def _handle_enemy_melee(self) -> None:
+        """Handles close-range melee strikes from enemies."""
         for enemy in self.game.enemies:
             if hasattr(enemy, "melee_cooldown") and enemy.melee_cooldown > 0:
                 enemy.melee_cooldown -= 1
@@ -21,27 +27,30 @@ class CollisionManager:
                 dist_to_player = enemy.pos.distance_to(self.game.player.pos)
                 if dist_to_player <= 35:
                     if getattr(enemy, "melee_cooldown", 0) == 0:
-                        self.game.player.hp -= 10
-                        enemy.melee_cooldown = 60  # 1 секунда кулдауну
+                        self._apply_melee_hit(enemy)
 
-                        # Відштовхування
-                        push_dir = self.game.player.pos - enemy.pos
-                        push_dir = push_dir.normalize() if push_dir.length() > 0 else pygame.math.Vector2(1, 0)
+    def _apply_melee_hit(self, enemy) -> None:
+        """Damages and knocks back the player from a single melee strike."""
+        self.game.player.hp -= 10
+        enemy.melee_cooldown = 60  # 1 second cooldown
 
-                        old_pos = pygame.math.Vector2(self.game.player.pos)
-                        self.game.player.pos += push_dir * 45
-                        self.game.player.rect.center = (int(self.game.player.pos.x), int(self.game.player.pos.y))
+        push_dir = self.game.player.pos - enemy.pos
+        push_dir = push_dir.normalize() if push_dir.length() > 0 else pygame.math.Vector2(1, 0)
 
-                        if pygame.sprite.spritecollideany(self.game.player, self.game.obstacles):
-                            self.game.player.pos = old_pos
-                            self.game.player.rect.center = (int(self.game.player.pos.x), int(self.game.player.pos.y))
+        old_pos = pygame.math.Vector2(self.game.player.pos)
+        self.game.player.pos += push_dir * 45
+        self.game.player.rect.center = (int(self.game.player.pos.x), int(self.game.player.pos.y))
 
-                        if self.game.player.hp <= 0:
-                            self._trigger_game_over()
-                        print("Ворог штовхнув вас прикладом!")
+        if pygame.sprite.spritecollideany(self.game.player, self.game.obstacles):
+            self.game.player.pos = old_pos
+            self.game.player.rect.center = (int(self.game.player.pos.x), int(self.game.player.pos.y))
 
-    def _handle_bullets(self):
-        """Обробка траєкторій швидких куль у стіни та персонажів"""
+        if self.game.player.hp <= 0:
+            self._trigger_game_over()
+        logger.debug("Enemy hit the player with a melee strike")
+
+    def _handle_bullets(self) -> None:
+        """Handles fast-moving bullet trajectories against walls and characters."""
         for bullet in list(self.game.bullets):
             if pygame.sprite.spritecollideany(bullet, self.game.obstacles):
                 bullet.kill()
@@ -57,8 +66,8 @@ class CollisionManager:
                     self._damage_enemy(enemy, bullet.damage)
                     bullet.kill()
 
-    def _damage_player(self, damage):
-        """Логіка поглинання шкоди бронежилетом гравця"""
+    def _damage_player(self, damage: float) -> None:
+        """Applies damage to the player, absorbed first by armor."""
         damage_to_deal = damage
         if self.game.player.armor > 0:
             absorption = int(damage_to_deal * 0.6)
@@ -72,8 +81,8 @@ class CollisionManager:
         if self.game.player.hp <= 0:
             self._trigger_game_over()
 
-    def _trigger_game_over(self):
-        """Централізований перехід у стан поразки з відповідними звуками"""
+    def _trigger_game_over(self) -> None:
+        """Centralized transition to the defeat state, with matching sounds."""
         if self.game.game_state == "GAME_OVER":
             return
         self.game.game_state = "GAME_OVER"
@@ -81,8 +90,8 @@ class CollisionManager:
         self.game.sound.play("defeat_jingle")
         self.game.sound.stop_music()
 
-    def _damage_enemy(self, enemy, damage):
-        """Логіка нанесення шкоди ворогу з урахуванням його броні"""
+    def _damage_enemy(self, enemy, damage: float) -> None:
+        """Applies damage to an enemy, absorbed first by armor."""
         damage_to_deal = damage
         if enemy.armor > 0:
             absorption = int(damage_to_deal * 0.5)
@@ -100,7 +109,7 @@ class CollisionManager:
             enemy.kill()
             self.game.sound.play("enemy_death")
 
-            # Нагорода за ліквідацію ворога з вогнепальної зброї
+            # Reward for eliminating an enemy with a firearm
             self.game.progression.add_xp(100)
             self.game.shop.add_money(30)
-            print(f"[REWARD] Ворог знищений! +100 XP | +30$")
+            logger.info("Enemy eliminated! +100 XP | +30$")

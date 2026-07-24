@@ -1,11 +1,15 @@
 # src/core/sound_manager.py
+import logging
 import os
+
 import pygame
+
+logger = logging.getLogger(__name__)
 
 SOUNDS_DIR = "assets/sounds"
 
-# Відносні гучності для окремих категорій ефектів (0.0 - 1.0)
-_SFX_VOLUMES = {
+# Relative volumes for individual effect categories (0.0 - 1.0)
+_SFX_VOLUMES: dict[str, float] = {
     "weapon_knife": 0.7,
     "weapon_pistol_silenced": 0.6,
     "weapon_rifle": 0.7,
@@ -18,7 +22,7 @@ _SFX_VOLUMES = {
     "victory_jingle": 0.9,
 }
 
-_SFX_FILES = {
+_SFX_FILES: dict[str, str] = {
     "weapon_knife": "weapons/knife.wav",
     "weapon_pistol_silenced": "weapons/pistol_silenced.wav",
     "weapon_rifle": "weapons/rifle.wav",
@@ -36,26 +40,27 @@ MUSIC_VOLUME = 0.18
 
 
 class SoundManager:
-    """Централізоване відтворення звукових ефектів та фонової музики.
+    """Centralized playback of sound effects and background music.
 
-    Якщо звукова підсистема недоступна (немає аудіопристрою тощо), менеджер
-    тихо вимикається (self.enabled = False), і гра продовжує працювати без звуку.
+    If the audio subsystem is unavailable (no audio device, etc.), the manager
+    silently disables itself (self.enabled = False) and the game keeps running
+    without sound.
     """
 
-    def __init__(self, sfx_volume=1.0, music_volume=1.0):
+    def __init__(self, sfx_volume: float = 1.0, music_volume: float = 1.0) -> None:
         self.enabled = True
         try:
             if pygame.mixer.get_init() is None:
                 pygame.mixer.init()
-        except Exception as e:
-            print(f"[SOUND] Аудіопідсистема недоступна: {e}")
+        except pygame.error:
+            logger.warning("Audio subsystem unavailable", exc_info=True)
             self.enabled = False
 
-        self.sfx = {}
+        self.sfx: dict[str, pygame.mixer.Sound] = {}
         self._music_state = "stopped"  # stopped | playing | paused
         self._footstep_toggle = False
 
-        # Множники гучності, які регулюються гравцем через екран налаштувань (0.0 - 1.0)
+        # Volume multipliers controlled by the player via the settings screen (0.0 - 1.0)
         self.sfx_volume = max(0.0, min(1.0, sfx_volume))
         self.music_volume = max(0.0, min(1.0, music_volume))
 
@@ -63,44 +68,44 @@ class SoundManager:
             for key, rel_path in _SFX_FILES.items():
                 self._load_sfx(key, rel_path)
 
-    def _load_sfx(self, key, rel_path):
+    def _load_sfx(self, key: str, rel_path: str) -> None:
         path = os.path.join(SOUNDS_DIR, rel_path)
         try:
             sound = pygame.mixer.Sound(path)
             sound.set_volume(_SFX_VOLUMES.get(key, 0.7) * self.sfx_volume)
             self.sfx[key] = sound
-        except Exception as e:
-            print(f"[SOUND] Не вдалося завантажити {path}: {e}")
+        except (pygame.error, OSError):
+            logger.warning("Failed to load sound file %s", path, exc_info=True)
 
-    def set_sfx_volume(self, value):
-        """Встановлює загальний множник гучності ефектів (0.0 - 1.0)"""
+    def set_sfx_volume(self, value: float) -> None:
+        """Sets the overall SFX volume multiplier (0.0 - 1.0)."""
         self.sfx_volume = max(0.0, min(1.0, value))
         for key, sound in self.sfx.items():
             sound.set_volume(_SFX_VOLUMES.get(key, 0.7) * self.sfx_volume)
 
-    def set_music_volume(self, value):
-        """Встановлює загальний множник гучності фонової музики (0.0 - 1.0)"""
+    def set_music_volume(self, value: float) -> None:
+        """Sets the overall background music volume multiplier (0.0 - 1.0)."""
         self.music_volume = max(0.0, min(1.0, value))
         if self.enabled:
             pygame.mixer.music.set_volume(MUSIC_VOLUME * self.music_volume)
 
-    def play(self, key):
+    def play(self, key: str) -> None:
         if not self.enabled:
             return
         sound = self.sfx.get(key)
         if sound:
             sound.play()
 
-    def play_weapon(self, weapon_name):
+    def play_weapon(self, weapon_name: str) -> None:
         self.play(f"weapon_{weapon_name}")
 
-    def play_footstep(self):
-        """Чергує два семпли кроків для природнішого звучання ходьби"""
+    def play_footstep(self) -> None:
+        """Alternates between two footstep samples for a more natural sound."""
         self._footstep_toggle = not self._footstep_toggle
         self.play("footstep1" if self._footstep_toggle else "footstep2")
 
-    def start_music(self):
-        """Запускає (або знімає з паузи) фонову музику. Викликається лише під час гри."""
+    def start_music(self) -> None:
+        """Starts (or resumes) background music. Only called during gameplay."""
         if not self.enabled or self._music_state == "playing":
             return
 
@@ -111,25 +116,25 @@ class SoundManager:
                 pygame.mixer.music.load(MUSIC_PATH)
                 pygame.mixer.music.set_volume(MUSIC_VOLUME * self.music_volume)
                 pygame.mixer.music.play(loops=-1)
-            except Exception as e:
-                print(f"[SOUND] Не вдалося завантажити фонову музику: {e}")
+            except (pygame.error, OSError):
+                logger.warning("Failed to load background music", exc_info=True)
                 return
 
         self._music_state = "playing"
 
-    def pause_music(self):
-        """Ставить фонову музику на паузу (меню, пауза, магазин тощо)"""
+    def pause_music(self) -> None:
+        """Pauses background music (menu, pause, shop, etc.)."""
         if not self.enabled or self._music_state != "playing":
             return
         pygame.mixer.music.pause()
         self._music_state = "paused"
 
-    def stop_music(self):
-        """Повністю зупиняє фонову музику (напр. перед мелодією перемоги/програшу)"""
+    def stop_music(self) -> None:
+        """Fully stops background music (e.g. before the victory/defeat jingle)."""
         if not self.enabled:
             return
         pygame.mixer.music.stop()
         self._music_state = "stopped"
 
-    def is_music_playing(self):
+    def is_music_playing(self) -> bool:
         return self._music_state == "playing"
