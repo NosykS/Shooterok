@@ -22,6 +22,8 @@ class Player(pygame.sprite.Sprite):
 
         # Load the weapon first so we know which sprite variant to load
         self._current_weapon: str = self.game.profile_data.get("equipped_weapon", "pistol_silenced")
+        self.is_reloading = False
+        self.reload_start_time = 0
 
         self.base_image = self._load_player_image()
         self.image = self.base_image.copy()
@@ -54,18 +56,14 @@ class Player(pygame.sprite.Sprite):
         self.refill_all_ammo()
 
     def _load_player_image(self) -> pygame.Surface:
-        """Loads the player sprite from the 'Hitman 1' folder based on the equipped weapon."""
+        """Loads the player sprite from the 'Hitman 1' folder for the current weapon/state."""
         folder_name = "Hitman 1"
         character_prefix = "hitman1"
 
-        if self._current_weapon == "knife":
-            suffix = "hold"
-        elif "silenced" in self._current_weapon:
-            suffix = "silencer"
-        elif self._current_weapon in ["rifle", "shotgun"]:
-            suffix = "machine"
-        else:
-            suffix = "gun"
+        # "sprite_suffix" in WEAPONS picks the closest existing pose; several
+        # newer weapons (hammer, dual_swords, sniper_rifle, ...) don't have
+        # dedicated art yet and reuse an existing one on purpose.
+        suffix = "reload" if self.is_reloading else self.weapon_stats.get("sprite_suffix", "gun")
 
         image_path = f"assets/images/{folder_name}/{character_prefix}_{suffix}.png"
 
@@ -179,6 +177,7 @@ class Player(pygame.sprite.Sprite):
             self._current_weapon = weapon_name
             self.game.profile_data["equipped_weapon"] = weapon_name
             self.shoot_cooldown_timer = 0
+            self.is_reloading = False  # Switching weapons cancels an in-progress reload
 
             # Update the sprite to match the new weapon
             self.base_image = self._load_player_image()
@@ -197,15 +196,20 @@ class Player(pygame.sprite.Sprite):
         current_time = pygame.time.get_ticks()
         stats = self.weapon_stats
 
+        if self.is_reloading:
+            self._update_reload(current_time)
+            return None
+
         if current_time - self.last_shot_time < stats["shoot_cooldown"]:
             return None
 
-        if self.current_weapon == "knife":
+        if stats.get("is_melee", False):
             self.last_shot_time = current_time
             self.current_noise_radius = stats.get("noise_radius", 0)
             return "melee"
 
         if self.weapons_ammo.get(self.current_weapon, 0) <= 0:
+            self._start_reload(current_time, stats)
             return None
 
         self.weapons_ammo[self.current_weapon] -= 1
@@ -253,6 +257,31 @@ class Player(pygame.sprite.Sprite):
                 return [single_bullet]
 
         return None
+
+    def _start_reload(self, current_time: int, stats: dict) -> None:
+        """Begins a reload on empty ammo, or refills instantly if the weapon has no reload_time set."""
+        reload_time = stats.get("reload_time", 0)
+        if reload_time <= 0:
+            self.weapons_ammo[self.current_weapon] = stats.get("ammo_capacity", 0)
+            return
+
+        self.is_reloading = True
+        self.reload_start_time = current_time
+        self.base_image = self._load_player_image()
+        self.image = self.base_image.copy()
+        logger.info("Reloading %s (%d ms)...", self.current_weapon, reload_time)
+
+    def _update_reload(self, current_time: int) -> None:
+        """Finishes the in-progress reload once its reload_time has elapsed."""
+        reload_time = self.weapon_stats.get("reload_time", 0)
+        if current_time - self.reload_start_time < reload_time:
+            return
+
+        self.weapons_ammo[self.current_weapon] = self.weapon_stats.get("ammo_capacity", 0)
+        self.is_reloading = False
+        self.base_image = self._load_player_image()
+        self.image = self.base_image.copy()
+        logger.info("Reload complete: %s", self.current_weapon)
 
     def update(self, keys, obstacles, camera) -> None:
         self.handle_movement(keys, obstacles)
