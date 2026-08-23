@@ -53,7 +53,11 @@ ENEMY_TYPES: dict[str, dict[str, Any]] = {
     }
 }
 
-# Weapon stats (noise radius in pixels, damage, cooldown, ammo, spread)
+# Weapon stats (noise radius in pixels, damage, cooldown, ammo, spread).
+# "is_melee" weapons skip ammo/reload entirely. "sprite_suffix" picks which
+# Hitman pose variant to render (see Player._load_player_image) — several
+# new weapons below reuse the closest existing pose since dedicated art
+# doesn't exist yet.
 WEAPONS: dict[str, dict[str, Any]] = {
     "knife": {
         "damage": 50,
@@ -61,7 +65,39 @@ WEAPONS: dict[str, dict[str, Any]] = {
         "ammo_capacity": 0,
         "spread": 0,
         "bullet_speed": 0,
-        "shoot_cooldown": 500
+        "shoot_cooldown": 500,
+        "is_melee": True,
+        "sprite_suffix": "hold",
+    },
+    "hammer": {
+        "damage": 80,
+        "noise_radius": 30,       # Still makes some noise on impact
+        "ammo_capacity": 0,
+        "spread": 0,
+        "bullet_speed": 0,
+        "shoot_cooldown": 900,    # Heavy, slow swings (tank_melee main hand)
+        "is_melee": True,
+        "sprite_suffix": "hold",
+    },
+    "dual_swords": {
+        "damage": 35,
+        "noise_radius": 20,
+        "ammo_capacity": 0,
+        "spread": 0,
+        "bullet_speed": 0,
+        "shoot_cooldown": 280,    # Fast paired strikes (dd_melee main hand)
+        "is_melee": True,
+        "sprite_suffix": "hold",
+    },
+    "pistol": {
+        "damage": 45,
+        "noise_radius": 150,
+        "ammo_capacity": 14,
+        "spread": 4,
+        "bullet_speed": 13,
+        "shoot_cooldown": 350,
+        "reload_time": 1200,
+        "sprite_suffix": "gun",
     },
     "pistol_silenced": {
         "damage": 60,
@@ -69,7 +105,9 @@ WEAPONS: dict[str, dict[str, Any]] = {
         "ammo_capacity": 12,
         "spread": 3,
         "bullet_speed": 12,
-        "shoot_cooldown": 400
+        "shoot_cooldown": 400,
+        "reload_time": 1000,
+        "sprite_suffix": "silencer",
     },
     "rifle": {
         "damage": 40,
@@ -78,7 +116,31 @@ WEAPONS: dict[str, dict[str, Any]] = {
         "ammo_capacity": 30,     # Large magazine
         "spread": 6,             # Medium accuracy at range
         "bullet_speed": 18,      # Fast bullet
-        "shoot_cooldown": 150
+        "shoot_cooldown": 150,
+        "reload_time": 1800,
+        "sprite_suffix": "machine",
+    },
+    "assault_rifle": {
+        "damage": 32,
+        "falloff": 0.994,        # Holds accuracy at mid-range, weaker further out
+        "noise_radius": 320,
+        "ammo_capacity": 25,
+        "spread": 4,              # Tighter cone than "rifle" (dd_ranged_mid main hand)
+        "bullet_speed": 17,
+        "shoot_cooldown": 180,    # Medium fire rate (between pistol and rifle)
+        "reload_time": 1600,
+        "sprite_suffix": "machine",
+    },
+    "sniper_rifle": {
+        "damage": 150,
+        "falloff": 0.9995,        # Barely loses damage with distance
+        "noise_radius": 450,      # Very loud
+        "ammo_capacity": 4,
+        "spread": 1,               # Very precise (dd_ranged_glass main hand)
+        "bullet_speed": 24,
+        "shoot_cooldown": 1100,   # Slow fire rate
+        "reload_time": 2800,      # Long reload, per RPG_CLASS_SYSTEM.md
+        "sprite_suffix": "machine",
     },
     "shotgun": {
         "damage": 20,
@@ -88,8 +150,36 @@ WEAPONS: dict[str, dict[str, Any]] = {
         "spread": 16,             # Pellet spread angle (fan pattern)
         "bullet_speed": 14,
         "shoot_cooldown": 600,
-        "pellets_count": 8        # Number of pellets fired per shot
-    }
+        "pellets_count": 8,       # Number of pellets fired per shot
+        "reload_time": 1500,
+        "sprite_suffix": "machine",
+    },
+    "combat_shotgun": {
+        "damage": 18,
+        "falloff": 0.992,         # Holds up better at medium range than "shotgun"
+        "noise_radius": 380,
+        "ammo_capacity": 8,
+        "spread": 8,               # Tighter cone than "shotgun" (tank_ranged main hand)
+        "bullet_speed": 15,
+        "shoot_cooldown": 700,
+        "pellets_count": 6,
+        "reload_time": 1800,
+        "sprite_suffix": "machine",
+    },
+}
+
+# Off-hand items: purely descriptive right now, no combat stats of their
+# own. Shield's defensive effect is already expressed via tank_*'s
+# armor_mult/evasion in CLASS_DEFINITIONS; scepter is the flavor "channel"
+# for heal/buff/control active skills, which aren't implemented yet
+# (see RPG_CLASS_SYSTEM.md sections 4-5).
+OFFHAND_ITEMS: dict[str, dict[str, Any]] = {
+    "shield": {
+        "description": "Passive defensive off-hand for tank subtypes.",
+    },
+    "scepter": {
+        "description": "Off-hand channel for heal/buff/control active skills.",
+    },
 }
 
 # RPG class definitions: base_class groups the 4 player-facing classes
@@ -106,7 +196,8 @@ CLASS_DEFINITIONS: dict[str, dict[str, Any]] = {
         "evasion": 0.0,
         "damage_mult": 0.7,
         "range_type": "melee",
-        "allowed_weapons": ["knife", "shotgun"],
+        "main_hand": "hammer",
+        "off_hand": "shield",
     },
     "tank_ranged": {
         "base_class": "tank",
@@ -115,7 +206,8 @@ CLASS_DEFINITIONS: dict[str, dict[str, Any]] = {
         "evasion": 0.25,          # Dodge chance substitutes for armor
         "damage_mult": 0.8,
         "range_type": "ranged",
-        "allowed_weapons": ["pistol", "rifle"],
+        "main_hand": "combat_shotgun",
+        "off_hand": "shield",
     },
     "dd_melee": {
         "base_class": "dd",
@@ -124,7 +216,8 @@ CLASS_DEFINITIONS: dict[str, dict[str, Any]] = {
         "evasion": 0.1,
         "damage_mult": 1.4,
         "range_type": "melee",
-        "allowed_weapons": ["knife"],
+        "main_hand": "dual_swords",
+        "off_hand": None,          # Both hands wielding the paired swords
     },
     "dd_ranged_glass": {
         "base_class": "dd",
@@ -133,7 +226,8 @@ CLASS_DEFINITIONS: dict[str, dict[str, Any]] = {
         "evasion": 0.1,
         "damage_mult": 2.0,
         "range_type": "ranged",
-        "allowed_weapons": ["rifle", "pistol_silenced"],
+        "main_hand": "sniper_rifle",
+        "off_hand": None,
     },
     "dd_ranged_mid": {
         "base_class": "dd",
@@ -142,7 +236,8 @@ CLASS_DEFINITIONS: dict[str, dict[str, Any]] = {
         "evasion": 0.1,
         "damage_mult": 1.3,        # Linear damage, no burst
         "range_type": "ranged",
-        "allowed_weapons": ["rifle", "shotgun"],
+        "main_hand": "assault_rifle",
+        "off_hand": None,
     },
     "heal_hot": {
         "base_class": "heal",
@@ -151,7 +246,8 @@ CLASS_DEFINITIONS: dict[str, dict[str, Any]] = {
         "evasion": 0.1,
         "damage_mult": 0.4,
         "range_type": "mid",       # No shields; multiple stacking HoT effects
-        "allowed_weapons": ["pistol"],
+        "main_hand": "pistol",
+        "off_hand": "scepter",
     },
     "heal_direct": {
         "base_class": "heal",
@@ -160,7 +256,8 @@ CLASS_DEFINITIONS: dict[str, dict[str, Any]] = {
         "evasion": 0.1,
         "damage_mult": 0.4,
         "range_type": "ranged",    # Instant heal on cast
-        "allowed_weapons": ["pistol_silenced"],
+        "main_hand": "pistol",
+        "off_hand": "scepter",
     },
     "support_buff": {
         "base_class": "support",
@@ -169,7 +266,8 @@ CLASS_DEFINITIONS: dict[str, dict[str, Any]] = {
         "evasion": 0.1,
         "damage_mult": 0.7,        # Deals damage, but noticeably less than DD
         "range_type": "mid",
-        "allowed_weapons": ["pistol", "shotgun"],
+        "main_hand": "pistol",
+        "off_hand": "scepter",
     },
     "support_control": {
         "base_class": "support",
@@ -178,7 +276,8 @@ CLASS_DEFINITIONS: dict[str, dict[str, Any]] = {
         "evasion": 0.15,
         "damage_mult": 0.5,        # Lowest damage among support subtypes
         "range_type": "mid",
-        "allowed_weapons": ["pistol"],
+        "main_hand": "pistol",
+        "off_hand": "scepter",
     },
 }
 
