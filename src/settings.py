@@ -92,6 +92,96 @@ WEAPONS: dict[str, dict[str, Any]] = {
     }
 }
 
+# RPG class definitions: base_class groups the 4 player-facing classes
+# (tank / dd / heal / support); the dict key is the concrete subtype that
+# gets assigned once skill picks settle it. Multipliers apply on top of
+# base stats (Player's hp/armor fields, or ENEMY_TYPES for enemies) so the
+# same table drives both Player and Enemy without duplicating logic.
+# See RPG_CLASS_SYSTEM.md section 3 for the full design rationale.
+CLASS_DEFINITIONS: dict[str, dict[str, Any]] = {
+    "tank_melee": {
+        "base_class": "tank",
+        "hp_mult": 1.6,
+        "armor_mult": 1.8,
+        "evasion": 0.0,
+        "damage_mult": 0.7,
+        "range_type": "melee",
+        "allowed_weapons": ["knife", "shotgun"],
+    },
+    "tank_ranged": {
+        "base_class": "tank",
+        "hp_mult": 1.1,
+        "armor_mult": 0.9,
+        "evasion": 0.25,          # Dodge chance substitutes for armor
+        "damage_mult": 0.8,
+        "range_type": "ranged",
+        "allowed_weapons": ["pistol", "rifle"],
+    },
+    "dd_melee": {
+        "base_class": "dd",
+        "hp_mult": 1.1,            # Tankier than other DD subtypes
+        "armor_mult": 1.0,
+        "evasion": 0.1,
+        "damage_mult": 1.4,
+        "range_type": "melee",
+        "allowed_weapons": ["knife"],
+    },
+    "dd_ranged_glass": {
+        "base_class": "dd",
+        "hp_mult": 0.6,
+        "armor_mult": 0.4,
+        "evasion": 0.1,
+        "damage_mult": 2.0,
+        "range_type": "ranged",
+        "allowed_weapons": ["rifle", "pistol_silenced"],
+    },
+    "dd_ranged_mid": {
+        "base_class": "dd",
+        "hp_mult": 0.85,
+        "armor_mult": 0.7,
+        "evasion": 0.1,
+        "damage_mult": 1.3,        # Linear damage, no burst
+        "range_type": "ranged",
+        "allowed_weapons": ["rifle", "shotgun"],
+    },
+    "heal_hot": {
+        "base_class": "heal",
+        "hp_mult": 0.9,
+        "armor_mult": 0.7,
+        "evasion": 0.1,
+        "damage_mult": 0.4,
+        "range_type": "mid",       # No shields; multiple stacking HoT effects
+        "allowed_weapons": ["pistol"],
+    },
+    "heal_direct": {
+        "base_class": "heal",
+        "hp_mult": 0.8,
+        "armor_mult": 0.6,
+        "evasion": 0.1,
+        "damage_mult": 0.4,
+        "range_type": "ranged",    # Instant heal on cast
+        "allowed_weapons": ["pistol_silenced"],
+    },
+    "support_buff": {
+        "base_class": "support",
+        "hp_mult": 0.9,
+        "armor_mult": 0.8,
+        "evasion": 0.1,
+        "damage_mult": 0.7,        # Deals damage, but noticeably less than DD
+        "range_type": "mid",
+        "allowed_weapons": ["pistol", "shotgun"],
+    },
+    "support_control": {
+        "base_class": "support",
+        "hp_mult": 0.85,
+        "armor_mult": 0.7,
+        "evasion": 0.15,
+        "damage_mult": 0.5,        # Lowest damage among support subtypes
+        "range_type": "mid",
+        "allowed_weapons": ["pistol"],
+    },
+}
+
 # Player movement settings
 PLAYER_SPEED_NORMAL: int = 5
 PLAYER_SPEED_STEALTH: int = 2
