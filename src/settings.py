@@ -361,6 +361,11 @@ ENEMY_SKILL_UNLOCK_LEVELS: list[dict[str, Any]] = [
     {"level": 20, "type": "active"},
 ]
 
+# Hard cap on player_level (RPG_CLASS_SYSTEM.md section 4: "cap лишається 20").
+# ProgressionManager.add_xp stops granting levels past this; xp still
+# accumulates (used nowhere once capped, but not worth special-casing away).
+PLAYER_LEVEL_CAP: int = 20
+
 # Player movement settings
 PLAYER_SPEED_NORMAL: int = 5
 PLAYER_SPEED_STEALTH: int = 2

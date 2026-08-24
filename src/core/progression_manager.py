@@ -2,7 +2,7 @@
 import logging
 from typing import Any
 
-from src.settings import SKILL_UNLOCK_LEVELS
+from src.settings import SKILL_UNLOCK_LEVELS, PLAYER_LEVEL_CAP
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +43,15 @@ class ProgressionManager:
         return self.data["player_level"] * 1000
 
     def add_xp(self, amount: int) -> None:
-        """Adds XP and handles level-up(s)."""
+        """Adds XP and handles level-up(s), capped at PLAYER_LEVEL_CAP.
+
+        XP still accumulates past the cap (simplest option — it's just never
+        spent again once player_level can't rise any further).
+        """
         self.data["xp"] += amount
         xp_needed = self.calculate_xp_for_next_level()
 
-        while self.data["xp"] >= xp_needed:
+        while self.data["xp"] >= xp_needed and self.data["player_level"] < PLAYER_LEVEL_CAP:
             self.data["xp"] -= xp_needed
             self.data["player_level"] += 1
             self.skill_points += 1

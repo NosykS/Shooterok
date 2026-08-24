@@ -87,6 +87,10 @@ class Game:
         self.save_feedback_timer = 0
         # Character index armed for deletion (needs a second confirming click); None = no pending delete
         self.pending_delete_index: int | None = None
+        # What CLASS_SELECT is for: "create" a brand-new character, or "respec"
+        # (change class on the already-active one). Determines what SELECT_CLASS
+        # does and where CLASS_SELECT_BACK returns to.
+        self.class_select_mode: str = "create"
 
         # Map memory
         self.saved_game_matrix = None
@@ -169,6 +173,39 @@ class Game:
         SaveManager.save_game(self.save_data)
         logger.info("Character created: %s (main hand: %s)", subtype, main_hand)
 
+    def respec_class(self, subtype: str) -> None:
+        """Changes the active character's class in place — free and unlimited,
+        done from the hub (MENU) rather than mid-mission, per RPG_CLASS_SYSTEM.md
+        section 4. Auto-grants/equips the new subtype's main_hand, same as
+        create_character. If a Player object already exists (from a previous
+        mission this session), its live class/weapon are updated too — otherwise
+        the change only takes effect once a mission next loads a fresh Player.
+        """
+        class_def = CLASS_DEFINITIONS.get(subtype)
+        if class_def is None:
+            logger.warning("Unknown class subtype for respec: %s", subtype)
+            return
+
+        self.profile_data["player_class"] = subtype
+
+        main_hand = class_def.get("main_hand")
+        if main_hand and main_hand not in self.profile_data["unlocked_weapons"]:
+            self.profile_data["unlocked_weapons"].append(main_hand)
+        if main_hand:
+            self.profile_data["equipped_weapon"] = main_hand
+
+        if self.player:
+            self.player.player_class = subtype
+            self.player.damage_mult = class_def.get("damage_mult", 1.0)
+            self.player.evasion = class_def.get("evasion", 0.0)
+            if main_hand:
+                unlocked = self.profile_data["unlocked_weapons"]
+                self.player.change_weapon(unlocked.index(main_hand))
+            self.apply_player_upgrades()
+
+        SaveManager.save_game(self.save_data)
+        logger.info("Respec: class changed to %s (main hand: %s)", subtype, main_hand)
+
     def select_character(self, index: int) -> None:
         """Makes an existing character (by index in save_data['characters']) the active one."""
         if not (0 <= index < len(self.save_data["characters"])):
@@ -216,11 +253,12 @@ class Game:
             UIButton(cx, cy + 138, 260, 45, "Вийти з гри", self.pause_font_btn, red_b, red_h, "QUIT")
         ]
         self.main_menu_buttons = [
-            UIButton(cx, cy - 130, 260, 45, "ПРОДОВЖИТИ", self.pause_font_btn, b_color, h_color, "CONTINUE_GAME"),
-            UIButton(cx, cy - 75, 260, 45, "НОВА ГРА", self.pause_font_btn, b_color, h_color, "NEW_GAME"),
-            UIButton(cx, cy - 20, 260, 45, "ЗМІНИТИ ПЕРСОНАЖА", self.pause_font_btn, b_color, h_color, "CHANGE_CHARACTER"),
-            UIButton(cx, cy + 35, 260, 45, "НАЛАШТУВАННЯ", self.pause_font_btn, b_color, h_color, "OPEN_SETTINGS"),
-            UIButton(cx, cy + 90, 260, 45, "ВИХІД", self.pause_font_btn, red_b, red_h, "QUIT")
+            UIButton(cx, cy - 137, 260, 45, "ПРОДОВЖИТИ", self.pause_font_btn, b_color, h_color, "CONTINUE_GAME"),
+            UIButton(cx, cy - 82, 260, 45, "НОВА ГРА", self.pause_font_btn, b_color, h_color, "NEW_GAME"),
+            UIButton(cx, cy - 27, 260, 45, "ЗМІНИТИ ПЕРСОНАЖА", self.pause_font_btn, b_color, h_color, "CHANGE_CHARACTER"),
+            UIButton(cx, cy + 28, 260, 45, "РЕСПЕК КЛАСУ", self.pause_font_btn, b_color, h_color, "OPEN_RESPEC"),
+            UIButton(cx, cy + 83, 260, 45, "НАЛАШТУВАННЯ", self.pause_font_btn, b_color, h_color, "OPEN_SETTINGS"),
+            UIButton(cx, cy + 138, 260, 45, "ВИХІД", self.pause_font_btn, red_b, red_h, "QUIT")
         ]
         self.settings_buttons = [
             UIButton(cx, cy + 150, 260, 45, "Назад", self.pause_font_btn, b_color, h_color, "SETTINGS_BACK"),
@@ -669,16 +707,22 @@ class Game:
             btn.draw(self.screen)
 
     def _draw_class_select_screen(self) -> None:
-        """Renders the character-creation screen: pick a new character's RPG subtype directly."""
+        """Renders the class-select screen: create a new character, or respec the active one."""
         self.screen.fill((15, 20, 30))
         cx = SCREEN_WIDTH // 2
 
-        title = self.pause_font_title.render("ОБЕРІТЬ КЛАС", True, (0, 150, 255))
+        is_respec = self.class_select_mode == "respec"
+        title_text = "РЕСПЕК КЛАСУ" if is_respec else "ОБЕРІТЬ КЛАС"
+        subtitle_text = (
+            "Безкоштовна зміна класу — стати й зброя перераховуються одразу"
+            if is_respec else
+            "Клас визначає стати, дозволену зброю та стартову екіпіровку"
+        )
+
+        title = self.pause_font_title.render(title_text, True, (0, 150, 255))
         self.screen.blit(title, title.get_rect(center=(cx, 90)))
 
-        subtitle = self.hud_small_font.render(
-            "Клас визначає стати, дозволену зброю та стартову екіпіровку", True, (180, 180, 180)
-        )
+        subtitle = self.hud_small_font.render(subtitle_text, True, (180, 180, 180))
         self.screen.blit(subtitle, subtitle.get_rect(center=(cx, 130)))
 
         for btn in self.class_select_buttons:

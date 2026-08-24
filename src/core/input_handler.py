@@ -130,7 +130,10 @@ class InputHandler:
 
         elif self.game.game_state == "CLASS_SELECT":
             if event.key == pygame.K_ESCAPE:
-                self.game.game_state = "CHARACTER_SELECT"
+                if self.game.class_select_mode == "respec":
+                    self.game.game_state = "MENU"
+                else:
+                    self.game.game_state = "CHARACTER_SELECT"
 
         elif self.game.game_state == "GAME_OVER":
             if event.key == pygame.K_r:
@@ -224,6 +227,10 @@ class InputHandler:
             self.game.game_state = "CHARACTER_SELECT"
         elif action == "CREATE_CHARACTER":
             self.game.pending_delete_index = None
+            self.game.class_select_mode = "create"
+            self.game.game_state = "CLASS_SELECT"
+        elif action == "OPEN_RESPEC":
+            self.game.class_select_mode = "respec"
             self.game.game_state = "CLASS_SELECT"
         elif action.startswith("PICK_CHARACTER:"):
             self.game.pending_delete_index = None
@@ -232,10 +239,17 @@ class InputHandler:
         elif action.startswith("DELETE_CHARACTER:"):
             self._handle_delete_character(int(action.split(":", 1)[1]))
         elif action.startswith("SELECT_CLASS:"):
-            self.game.create_character(action.split(":", 1)[1])
+            subtype = action.split(":", 1)[1]
+            if self.game.class_select_mode == "respec":
+                self.game.respec_class(subtype)
+            else:
+                self.game.create_character(subtype)
             self.game.game_state = "MENU"
         elif action == "CLASS_SELECT_BACK":
-            self.game.game_state = "CHARACTER_SELECT"
+            if self.game.class_select_mode == "respec":
+                self.game.game_state = "MENU"
+            else:
+                self.game.game_state = "CHARACTER_SELECT"
         elif action == "OPEN_SETTINGS":
             # Remember where to return to (main menu or pause)
             self.game.settings_return_state = self.game.game_state
