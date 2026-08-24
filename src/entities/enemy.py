@@ -14,6 +14,7 @@ from src.settings import (
 from src.objects.bullet import Bullet
 from src.core.physics import get_nearby_obstacles, resolve_axis_collision
 from src.core.sprite_loader import load_character_sprite
+from src.core.active_effects import process_active_effects
 
 # Shared across all enemies: AStarFinder holds no per-search state (just the
 # diagonal_movement config), so one instance is safe to reuse for every path
@@ -73,6 +74,10 @@ class Enemy(pygame.sprite.Sprite):
         self.hp_regen_per_sec: float = sum(
             tier.get("hp_regen_per_sec", 0) for tier in passive_tiers
         )
+
+        # HoT/DoT/timed-buff infrastructure (RPG_CLASS_SYSTEM.md step 13, see
+        # src/core/active_effects.py). Empty until a skill actually applies one.
+        self.active_effects: list[dict] = []
 
         # Vitals and defense
         self.hp = round(self.stats["hp"] * hp_mult)
@@ -376,6 +381,8 @@ class Enemy(pygame.sprite.Sprite):
 
         if self.hp_regen_per_sec > 0 and self.hp < self.max_hp:
             self.hp = min(self.max_hp, self.hp + self.hp_regen_per_sec / FPS)
+
+        process_active_effects(self)
 
         if not hasattr(self, "_stuck_check_pos"):
             self._stuck_check_pos = pygame.math.Vector2(self.pos)

@@ -13,6 +13,7 @@ from src.objects.bullet import Bullet
 from src.core.physics import get_nearby_obstacles, resolve_axis_collision
 from src.core.sprite_loader import load_character_sprite
 from src.core.ui import draw_gear_icons
+from src.core.active_effects import process_active_effects
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,10 @@ class Player(pygame.sprite.Sprite):
         self.active_skill_id: str | None = None
         self.active_skill_cooldown_end: int = 0
         self.refresh_skill_bonuses()
+
+        # HoT/DoT/timed-buff infrastructure (RPG_CLASS_SYSTEM.md step 13, see
+        # src/core/active_effects.py). Empty until a skill actually applies one.
+        self.active_effects: list[dict] = []
 
         # Load the weapon first so we know which sprite variant to load
         self._current_weapon: str = self.game.profile_data.get("equipped_weapon", "pistol_silenced")
@@ -403,6 +408,7 @@ class Player(pygame.sprite.Sprite):
         self.handle_movement(keys, obstacles)
         self.rotate_to_mouse(camera)
         self.rect.center = self.pos
+        process_active_effects(self)
 
     def refill_all_ammo(self) -> None:
         for w_name, w_data in WEAPONS.items():
