@@ -167,6 +167,7 @@ def draw_controls_help(screen: pygame.Surface, font_ui: pygame.font.Font) -> Non
         "HOLD MOUSE - Continuous Attack",
         "1, 2, 3 - Switch Weapons",
         "E - Enter / Exit Cover (Bush)",
+        "Q - Active Skill (if unlocked)",
         "R - Manual Reset Level"
     ]
     start_y = 20
@@ -249,6 +250,15 @@ def draw_game_ui(screen: pygame.Surface, player, enemies, keys, font_small: pyga
     screen.blit(weapon_ui_text, (20, SCREEN_HEIGHT - 85))
     screen.blit(status_ui_text, (20, SCREEN_HEIGHT - 55))
     screen.blit(threat_ui_text, (20, SCREEN_HEIGHT - 25))
+
+    if getattr(player, "active_skill_id", None):
+        cooldown_remaining = player.active_skill_cooldown_end - pygame.time.get_ticks()
+        if cooldown_remaining > 0:
+            skill_text, skill_color = f"SKILL (Q): {cooldown_remaining / 1000:.1f}s", (150, 150, 150)
+        else:
+            skill_text, skill_color = "SKILL (Q): READY", (100, 255, 255)
+        skill_ui_text = font_small.render(skill_text, True, skill_color)
+        screen.blit(skill_ui_text, (20, SCREEN_HEIGHT - 115))
 
 
 def draw_gunshot_flash(

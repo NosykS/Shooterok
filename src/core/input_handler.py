@@ -58,6 +58,8 @@ class InputHandler:
             self.game.missions.spawn_mission_objectives()
         elif event.key == pygame.K_e:
             self.game.player.toggle_hiding_spot(self.game.hiding_spots)
+        elif event.key == pygame.K_q:
+            self.game.trigger_active_skill()
 
     def _handle_weapon_hotkey(self, key: int) -> None:
         """Switches the equipped weapon.
@@ -202,6 +204,7 @@ class InputHandler:
             "SETTINGS": self.game.settings_buttons,
             "CLASS_SELECT": self.game.class_select_buttons,
             "CHARACTER_SELECT": self.game.character_select_buttons,
+            "SKILL_PICK": self.game.skill_pick_buttons,
         }
         return buttons_by_state.get(self.game.game_state, [])
 
@@ -250,6 +253,8 @@ class InputHandler:
                 self.game.game_state = "MENU"
             else:
                 self.game.game_state = "CHARACTER_SELECT"
+        elif action.startswith("PICK_SKILL:"):
+            self.game.pick_skill(action.split(":", 1)[1])
         elif action == "OPEN_SETTINGS":
             # Remember where to return to (main menu or pause)
             self.game.settings_return_state = self.game.game_state

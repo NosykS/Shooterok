@@ -348,6 +348,60 @@ CLASS_DEFINITIONS: dict[str, dict[str, Any]] = {
 # type; slots stay pending (skill_id=None) until a catalog + selection UI exist.
 SKILL_UNLOCK_LEVELS: list[int] = [2, 4, 6, 8, 10, 12, 14, 16, 18, 20]
 
+# Minimal skill catalog (RPG_CLASS_SYSTEM.md step 8): covers only the first
+# active (level 2) and first passive (level 4) slots, for dd_ranged_mid only —
+# just enough to exercise the level-up pick screen end to end (step 9). The
+# other 8 slots and other 8 classes are intentionally not filled in yet; a
+# player of any other class (or a level-2/4 slot with no catalog entry) simply
+# never gets a pick-screen prompt for that slot (ProgressionManager still
+# records it as pending, unresolved).
+#
+# Active skills are one-off instant effects (no duration/DoT/HoT — that's the
+# active_effects infrastructure of step 13, not built yet), triggered by a
+# single Q hotkey since only one active slot exists so far (see
+# Player.try_trigger_active_skill). Passive skills are flat stat bonuses,
+# summed into the player's stats once picked (Player.refresh_skill_bonuses).
+SKILL_DEFINITIONS: dict[str, dict[str, Any]] = {
+    "dd_ranged_mid_active_snap_shot": {
+        "class_key": "dd_ranged_mid",
+        "level": 2,
+        "type": "active",
+        "name": "Миттєвий постріл",
+        "description": "Миттєвий бонусний постріл у напрямку прицілу, без витрати набоїв.",
+        "cooldown_ms": 6000,
+    },
+    "dd_ranged_mid_active_dash": {
+        "class_key": "dd_ranged_mid",
+        "level": 2,
+        "type": "active",
+        "name": "Тактичний ривок",
+        "description": "Миттєвий короткий стрибок вперед у напрямку курсора.",
+        "cooldown_ms": 6000,
+    },
+    "dd_ranged_mid_passive_precision": {
+        "class_key": "dd_ranged_mid",
+        "level": 4,
+        "type": "passive",
+        "name": "Влучність",
+        "description": "+15% урону від зброї.",
+        "damage_mult_bonus": 0.15,
+    },
+    "dd_ranged_mid_passive_thick_skin": {
+        "class_key": "dd_ranged_mid",
+        "level": 4,
+        "type": "passive",
+        "name": "Товста шкіра",
+        "description": "+4 фіксованого зменшення вхідного урону (до поглинання бронею).",
+        "damage_reduction_flat_bonus": 4,
+    },
+}
+
+# (class_key, level) -> the 2 skill_ids offered as a choice at that level-up.
+SKILL_LEVEL_OPTIONS: dict[tuple[str, int], list[str]] = {
+    ("dd_ranged_mid", 2): ["dd_ranged_mid_active_snap_shot", "dd_ranged_mid_active_dash"],
+    ("dd_ranged_mid", 4): ["dd_ranged_mid_passive_precision", "dd_ranged_mid_passive_thick_skin"],
+}
+
 # Enemy skill unlock cadence (RPG_CLASS_SYSTEM.md section 5): a fixed 5-slot kit per
 # class (3 passive + 2 active), tied to player_level rather than the enemy's own
 # leveling. Passive slots unlock first (no AI decision-making needed); active slots
@@ -371,6 +425,10 @@ PLAYER_SPEED_NORMAL: int = 5
 PLAYER_SPEED_STEALTH: int = 2
 PLAYER_NOISE_NORMAL: int = 100
 PLAYER_NOISE_STEALTH: int = 0
+
+# Running (non-stealth) is a bit faster with just a knife out — no gun to carry/aim.
+# Stealth-walk speed is unaffected regardless of weapon.
+KNIFE_RUN_SPEED_MULT: float = 1.15
 
 # Time in frames (FPS * seconds) before an enemy loses interest
 ENEMY_LOSE_INTEREST_TIME: int = 60 * 5  # 5 seconds at 60 FPS

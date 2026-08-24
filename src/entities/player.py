@@ -5,8 +5,9 @@ import random
 import pygame
 
 from src.settings import (
-    WEAPONS, CLASS_DEFINITIONS, PLAYER_SPEED_NORMAL,
-    PLAYER_SPEED_STEALTH, PLAYER_NOISE_NORMAL, PLAYER_NOISE_STEALTH
+    WEAPONS, CLASS_DEFINITIONS, SKILL_DEFINITIONS, PLAYER_SPEED_NORMAL,
+    PLAYER_SPEED_STEALTH, PLAYER_NOISE_NORMAL, PLAYER_NOISE_STEALTH,
+    KNIFE_RUN_SPEED_MULT
 )
 from src.objects.bullet import Bullet
 from src.core.physics import get_nearby_obstacles, resolve_axis_collision
@@ -26,8 +27,18 @@ class Player(pygame.sprite.Sprite):
         # which is the single place max_hp/max_armor get computed.
         self.player_class: str | None = self.game.profile_data.get("player_class")
         class_def = CLASS_DEFINITIONS.get(self.player_class, {})
-        self.damage_mult: float = class_def.get("damage_mult", 1.0)
+        self.base_damage_mult: float = class_def.get("damage_mult", 1.0)
         self.evasion: float = class_def.get("evasion", 0.0)
+
+        # Chosen-skill state (RPG_CLASS_SYSTEM.md steps 8-9): damage_mult/
+        # damage_reduction_flat fold in flat bonuses from picked passive skills;
+        # active_skill_id/cooldown drive the Q hotkey. Computed by
+        # refresh_skill_bonuses(), called here and again after picking a skill.
+        self.damage_mult: float = self.base_damage_mult
+        self.damage_reduction_flat: float = 0.0
+        self.active_skill_id: str | None = None
+        self.active_skill_cooldown_end: int = 0
+        self.refresh_skill_bonuses()
 
         # Load the weapon first so we know which sprite variant to load
         self._current_weapon: str = self.game.profile_data.get("equipped_weapon", "pistol_silenced")
@@ -63,6 +74,79 @@ class Player(pygame.sprite.Sprite):
 
         self.last_shot_time = pygame.time.get_ticks()
         self.refill_all_ammo()
+
+    def refresh_skill_bonuses(self) -> None:
+        """Recomputes stat bonuses/active skill from the player's chosen skills.
+
+        Called at spawn and again right after picking a new skill (Game.pick_skill)
+        so the effect applies immediately instead of waiting for the next mission.
+        """
+        self.damage_mult = self.base_damage_mult
+        self.damage_reduction_flat = 0.0
+        self.active_skill_id = None
+
+        for slot in self.game.profile_data.get("unlocked_skills", []):
+            skill = SKILL_DEFINITIONS.get(slot.get("skill_id"))
+            if skill is None:
+                continue
+
+            self.damage_mult += skill.get("damage_mult_bonus", 0.0)
+            self.damage_reduction_flat += skill.get("damage_reduction_flat_bonus", 0.0)
+
+            if skill["type"] == "active":
+                # Only one active slot exists in the catalog so far, so "the"
+                # active skill is unambiguous — see settings.SKILL_DEFINITIONS.
+                self.active_skill_id = slot["skill_id"]
+
+    def try_trigger_active_skill(self, camera) -> tuple[str, object] | None:
+        """Fires the player's chosen active skill (Q hotkey) if any and off cooldown.
+
+        Returns (kind, payload) for Game to apply — ("bullet", Bullet) needs
+        adding to the sprite groups, ("dash", None) is already fully applied
+        here. Returns None if there's no active skill or it's on cooldown.
+        """
+        if self.active_skill_id is None:
+            return None
+
+        current_time = pygame.time.get_ticks()
+        if current_time < self.active_skill_cooldown_end:
+            return None
+
+        skill = SKILL_DEFINITIONS[self.active_skill_id]
+        self.active_skill_cooldown_end = current_time + skill["cooldown_ms"]
+
+        mouse_x, mouse_y = pygame.mouse.get_pos()
+        world_mouse = pygame.math.Vector2(mouse_x - camera.camera_rect.x, mouse_y - camera.camera_rect.y)
+        aim_vector = world_mouse - self.pos
+        if aim_vector.length() == 0:
+            return None
+
+        if self.active_skill_id == "dd_ranged_mid_active_snap_shot":
+            stats = self.weapon_stats
+            _, angle = aim_vector.as_polar()
+            bullet = Bullet(
+                self.pos.x, self.pos.y, angle=angle,
+                damage=stats["damage"] * self.damage_mult, speed=stats["bullet_speed"],
+                is_enemy_bullet=False, falloff=stats.get("falloff", 1.0)
+            )
+            return "bullet", bullet
+
+        if self.active_skill_id == "dd_ranged_mid_active_dash":
+            dash_vector = aim_vector.copy()
+            dash_vector.scale_to_length(min(150, dash_vector.length()))
+
+            old_pos = pygame.math.Vector2(self.pos)
+            self.pos += dash_vector
+            self.hitbox.center = self.pos
+            self.rect.center = self.pos
+
+            if pygame.sprite.spritecollideany(self, self.game.obstacles):
+                self.pos = old_pos
+                self.hitbox.center = self.pos
+                self.rect.center = self.pos
+            return "dash", None
+
+        return None
 
     def _load_player_image(self) -> pygame.Surface:
         """Loads the player sprite from the 'Hitman 1' folder for the current weapon/state."""
@@ -113,10 +197,13 @@ class Player(pygame.sprite.Sprite):
 
         is_stealth = keys[pygame.K_LSHIFT]
         if is_stealth:
+            # Stealth-walk speed stays the same regardless of weapon
             self.speed = self.base_speed * (PLAYER_SPEED_STEALTH / PLAYER_SPEED_NORMAL)
             base_noise = PLAYER_NOISE_STEALTH
         else:
             self.speed = self.base_speed
+            if self.current_weapon == "knife":
+                self.speed *= KNIFE_RUN_SPEED_MULT
             base_noise = PLAYER_NOISE_NORMAL
 
         dx, dy = 0, 0

@@ -6,7 +6,8 @@ import pygame
 
 from src.settings import (
     SCREEN_WIDTH, SCREEN_HEIGHT, FPS, BG_COLOR,
-    WEAPONS, CLASS_DEFINITIONS, WORLD_WIDTH, WORLD_HEIGHT, ENEMY_LOSE_INTEREST_TIME
+    WEAPONS, CLASS_DEFINITIONS, SKILL_DEFINITIONS, SKILL_LEVEL_OPTIONS,
+    WORLD_WIDTH, WORLD_HEIGHT, ENEMY_LOSE_INTEREST_TIME
 )
 from src.core.ui import (
     draw_controls_help, draw_player_bars, draw_game_ui,
@@ -91,6 +92,13 @@ class Game:
         # (change class on the already-active one). Determines what SELECT_CLASS
         # does and where CLASS_SELECT_BACK returns to.
         self.class_select_mode: str = "create"
+        # Pending level-up skill choice (RPG_CLASS_SYSTEM.md steps 8-9): the
+        # {level,type,skill_id} slot currently being resolved, and which
+        # game_state to return to once it's picked (PLAYING, VICTORY, etc. —
+        # whatever was active when the slot appeared).
+        self.pending_skill_slot: dict | None = None
+        self.skill_pick_return_state: str = "PLAYING"
+        self.skill_pick_buttons: list[UIButton] = []
 
         # Map memory
         self.saved_game_matrix = None
@@ -196,8 +204,9 @@ class Game:
 
         if self.player:
             self.player.player_class = subtype
-            self.player.damage_mult = class_def.get("damage_mult", 1.0)
+            self.player.base_damage_mult = class_def.get("damage_mult", 1.0)
             self.player.evasion = class_def.get("evasion", 0.0)
+            self.player.refresh_skill_bonuses()  # re-applies base_damage_mult + any picked skills' bonuses
             if main_hand:
                 unlocked = self.profile_data["unlocked_weapons"]
                 self.player.change_weapon(unlocked.index(main_hand))
@@ -205,6 +214,74 @@ class Game:
 
         SaveManager.save_game(self.save_data)
         logger.info("Respec: class changed to %s (main hand: %s)", subtype, main_hand)
+
+    def _check_pending_skill_pick(self) -> None:
+        """Interrupts the current screen with a skill-pick prompt if a pending
+        slot has catalog entries for the player's class (see SKILL_LEVEL_OPTIONS).
+
+        Slots with no matching entries (most classes/levels — the catalog is
+        intentionally minimal, step 8) are left pending indefinitely; nothing
+        prompts for them yet.
+        """
+        if not self.player or self.game_state == "SKILL_PICK":
+            return
+
+        for slot in self.progression.get_pending_skill_slots():
+            options = SKILL_LEVEL_OPTIONS.get((self.player.player_class, slot["level"]))
+            if options:
+                self.pending_skill_slot = slot
+                self.skill_pick_return_state = self.game_state
+                self.refresh_skill_pick_buttons(options)
+                self.game_state = "SKILL_PICK"
+                return
+
+    def refresh_skill_pick_buttons(self, options: list[str]) -> None:
+        """Builds the 2 skill-choice buttons for the current pending slot."""
+        cx, cy = SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2
+        b_color, h_color = (40, 45, 55), (60, 80, 110)
+
+        buttons = []
+        for idx, skill_id in enumerate(options):
+            name = SKILL_DEFINITIONS[skill_id]["name"]
+            btn_y = cy - 40 + idx * 120
+            buttons.append(UIButton(cx, btn_y, 400, 55, name, self.pause_font_btn, b_color, h_color, f"PICK_SKILL:{skill_id}"))
+
+        self.skill_pick_buttons = buttons
+
+    def pick_skill(self, skill_id: str) -> None:
+        """Assigns a chosen skill to its pending slot and resumes the interrupted screen."""
+        skill = SKILL_DEFINITIONS.get(skill_id)
+        if skill is None or self.pending_skill_slot is None:
+            logger.warning("Invalid skill pick: %s", skill_id)
+            return
+
+        for slot in self.profile_data["unlocked_skills"]:
+            if slot is self.pending_skill_slot:
+                slot["skill_id"] = skill_id
+                break
+
+        if self.player:
+            self.player.refresh_skill_bonuses()
+
+        SaveManager.save_game(self.save_data)
+        logger.info("Skill picked: %s (%s)", skill_id, skill["name"])
+
+        self.pending_skill_slot = None
+        self.game_state = self.skill_pick_return_state
+
+    def trigger_active_skill(self) -> None:
+        """Activates the player's chosen active RPG skill (Q hotkey), if any and off cooldown."""
+        result = self.player.try_trigger_active_skill(self.camera)
+        if result is None:
+            return
+
+        kind, payload = result
+        if kind == "bullet":
+            self.all_sprites.add(payload)
+            self.bullets.add(payload)
+            self.sound.play_weapon(self.player.current_weapon)
+
+        logger.info("Active skill triggered: %s (%s)", self.player.active_skill_id, kind)
 
     def select_character(self, index: int) -> None:
         """Makes an existing character (by index in save_data['characters']) the active one."""
@@ -470,6 +547,7 @@ class Game:
         self.collision_ctrl.handle_all_collisions()
 
         self._check_mission_progress()
+        self._check_pending_skill_pick()
 
     def _update_enemies(self) -> None:
         """Updates enemy AI, throttled for enemies far outside the camera view."""
@@ -553,6 +631,9 @@ class Game:
 
         self._draw_overlay_menus()
 
+        if self.game_state == "SKILL_PICK":
+            self._draw_skill_pick_screen()
+
     def _draw_menu_screen(self) -> None:
         """Renders the main menu screen."""
         self.screen.fill((15, 20, 30))
@@ -632,10 +713,19 @@ class Game:
         """Draws the HUD panels and, while playing, the controls help and mission status text."""
         draw_player_bars(self.screen, self.player, self.hud_small_font)
         draw_game_ui(self.screen, self.player, self.enemies, pygame.key.get_pressed(), self.pause_font_btn)
+        self._draw_level_xp_hud()
 
         if self.game_state == "PLAYING":
             draw_controls_help(self.screen, self.pause_font_btn)
             self._draw_mission_status()
+
+    def _draw_level_xp_hud(self) -> None:
+        """Shows the player's current level and XP progress toward the next one."""
+        level = self.profile_data.get("player_level", 1)
+        xp = self.profile_data.get("xp", 0)
+        xp_needed = self.progression.calculate_xp_for_next_level()
+        text = self.hud_small_font.render(f"LEVEL {level}  |  XP: {xp}/{xp_needed}", True, (255, 215, 0))
+        self.screen.blit(text, (20, 65))
 
     def _draw_mission_status(self) -> None:
         """Draws the current mission's title and objective status text."""
@@ -705,6 +795,32 @@ class Game:
 
         for btn in self.character_select_buttons:
             btn.draw(self.screen)
+
+    def _draw_skill_pick_screen(self) -> None:
+        """Renders the level-up skill-choice overlay on top of whatever screen it interrupted."""
+        cx, cy = SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2
+        panel_rect = pygame.Rect(cx - 260, cy - 170, 520, 340)
+
+        pygame.draw.rect(self.screen, (20, 30, 45), panel_rect, border_radius=12)
+        pygame.draw.rect(self.screen, (0, 200, 255), panel_rect, width=2, border_radius=12)
+
+        slot_type = self.pending_skill_slot["type"] if self.pending_skill_slot else ""
+        type_label = "активний" if slot_type == "active" else "пасивний"
+        title = self.pause_font_title.render("НОВИЙ СКІЛ!", True, (0, 200, 255))
+        self.screen.blit(title, title.get_rect(center=(cx, panel_rect.top + 40)))
+
+        subtitle = self.hud_small_font.render(f"Оберіть {type_label} скіл", True, (180, 180, 180))
+        self.screen.blit(subtitle, subtitle.get_rect(center=(cx, panel_rect.top + 75)))
+
+        for btn in self.skill_pick_buttons:
+            btn.draw(self.screen)
+
+            action = getattr(btn, "action_value", "")
+            skill_id = action.split(":", 1)[1] if ":" in action else None
+            description = SKILL_DEFINITIONS.get(skill_id, {}).get("description", "")
+            if description:
+                desc_surf = self.hud_small_font.render(description, True, (170, 200, 220))
+                self.screen.blit(desc_surf, desc_surf.get_rect(center=(cx, btn.original_rect.bottom + 18)))
 
     def _draw_class_select_screen(self) -> None:
         """Renders the class-select screen: create a new character, or respec the active one."""

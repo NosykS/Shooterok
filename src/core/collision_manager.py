@@ -74,7 +74,7 @@ class CollisionManager:
                     bullet.kill()
 
     def _damage_player(self, damage: float) -> bool:
-        """Applies damage to the player, absorbed first by armor.
+        """Applies damage to the player: evasion roll, then flat skill reduction, then armor.
 
         Rolls the player's evasion first: on a successful dodge, returns False
         without touching armor/hp at all. Returns True if the hit landed.
@@ -83,7 +83,7 @@ class CollisionManager:
             logger.debug("Player evaded a hit (evasion=%.2f)", self.game.player.evasion)
             return False
 
-        damage_to_deal = damage
+        damage_to_deal = max(0.0, damage - getattr(self.game.player, "damage_reduction_flat", 0.0))
         if self.game.player.armor > 0:
             absorption = int(damage_to_deal * 0.6)
             if self.game.player.armor >= absorption:
