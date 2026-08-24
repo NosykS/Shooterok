@@ -3,6 +3,7 @@ import logging
 
 import pygame
 import pytmx
+from pathfinding.core.grid import Grid
 
 from src.settings import TILE_SIZE, ENEMY_TYPES, CLASS_DEFINITIONS
 from src.entities.player import Player
@@ -40,6 +41,20 @@ class LevelManager:
 
         return matrix
 
+    def _build_pathfinding_grid(self, game_matrix: list[list[int]]) -> Grid:
+        """Builds the A* walkability grid once per level load.
+
+        Every enemy reuses this single Grid for the whole mission instead of
+        rebuilding it from scratch on every re-path — walls are static once a
+        map is loaded. pathfinding.finder.Finder.find_path() safely cleans up
+        node state left over from the previous search before each new one, so
+        sequential reuse across enemies/frames is safe. Rebuilding this per
+        enemy per re-path used to cost ~28% of frame time during a firefight
+        (profiled 24.08.2026, see RPG_CLASS_SYSTEM.md section 8.4).
+        """
+        inverted_matrix = [[1 if cell == 0 else 0 for cell in row] for row in game_matrix]
+        return Grid(matrix=inverted_matrix)
+
     def reset_game_world(self, new_map: bool = True, new_level: bool = False) -> None:
         """Fully or partially resets scene state and loads the map from a TMX file."""
         # 1. Clear sprite groups
@@ -52,8 +67,9 @@ class LevelManager:
         self.game.obstacles = pygame.sprite.Group()
         self.game.hiding_spots = pygame.sprite.Group()
 
-        # Reset the pathfinding matrix before loading the new level
+        # Reset the pathfinding matrix/grid before loading the new level
         self.game.game_matrix = None
+        self.game.pathfinding_grid = None
 
         # 2. Determine the map file name from the current mission
         mission_num = self.game.missions.current_mission_num
@@ -74,6 +90,7 @@ class LevelManager:
 
             # --- GENERATE THE COLLISION MATRIX RIGHT AFTER BUILDING WALLS ---
             self.game.game_matrix = self.generate_collision_matrix()
+            self.game.pathfinding_grid = self._build_pathfinding_grid(self.game.game_matrix)
 
             player_spawn_pos, enemies_to_spawn = self._process_spawn_points(player_spawn_pos, enemies_to_spawn)
 
@@ -197,7 +214,7 @@ class LevelManager:
                 enemy_type=enemy_type,
                 enemy_class=enemy_class,
                 player_level=player_level,
-                game_matrix=self.game.game_matrix,
+                pathfinding_grid=self.game.pathfinding_grid,
                 custom_patrol=custom_patrol if custom_patrol else None
             )
             enemy.melee_cooldown = 0

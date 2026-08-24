@@ -69,6 +69,9 @@ class Game:
         self.obstacles = pygame.sprite.Group()
         self.hiding_spots = pygame.sprite.Group()
         self.game_matrix = None
+        # Shared A* walkability grid, built once per level load (LevelManager);
+        # every enemy reuses it instead of rebuilding it from scratch per re-path
+        self.pathfinding_grid = None
 
         self.camera = Camera(WORLD_WIDTH, WORLD_HEIGHT)
 
@@ -437,14 +440,11 @@ class Game:
             SCREEN_WIDTH + 400, SCREEN_HEIGHT + 400
         )
 
-        # Fall back to an empty matrix if the level hasn't been loaded yet
-        active_matrix = self.game_matrix if self.game_matrix is not None else []
-
         for enemy in self.enemies:
             if update_bound.colliderect(enemy.rect) or enemy.is_alerted:
-                enemy.update(self.player, active_matrix, self.obstacles)
+                enemy.update(self.player, self.pathfinding_grid, self.obstacles)
             elif (self.frame_counter + id(enemy)) % 6 == 0:
-                enemy.update(self.player, active_matrix, self.obstacles)
+                enemy.update(self.player, self.pathfinding_grid, self.obstacles)
 
     def _spawn_enemy_bullets(self) -> None:
         """Turns any bullets fired by enemies this frame into live Bullet sprites."""
