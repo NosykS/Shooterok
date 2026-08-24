@@ -1,5 +1,6 @@
 # src/core/collision_manager.py
 import logging
+import random
 
 import pygame
 
@@ -30,10 +31,17 @@ class CollisionManager:
                         self._apply_melee_hit(enemy)
 
     def _apply_melee_hit(self, enemy) -> None:
-        """Damages and knocks back the player from a single melee strike."""
+        """Damages and knocks back the player from a single melee strike.
+
+        Damage is routed through _damage_player so armor and evasion apply the
+        same way as any other hit; no knockback if the player evaded.
+        """
         base_melee_damage = 10
-        self.game.player.hp -= base_melee_damage * getattr(enemy, "damage_mult", 1.0)
+        hit_landed = self._damage_player(base_melee_damage * getattr(enemy, "damage_mult", 1.0))
         enemy.melee_cooldown = 60  # 1 second cooldown
+
+        if not hit_landed:
+            return
 
         push_dir = self.game.player.pos - enemy.pos
         push_dir = push_dir.normalize() if push_dir.length() > 0 else pygame.math.Vector2(1, 0)
@@ -46,8 +54,6 @@ class CollisionManager:
             self.game.player.pos = old_pos
             self.game.player.rect.center = (int(self.game.player.pos.x), int(self.game.player.pos.y))
 
-        if self.game.player.hp <= 0:
-            self._trigger_game_over()
         logger.debug("Enemy hit the player with a melee strike")
 
     def _handle_bullets(self) -> None:
@@ -67,8 +73,16 @@ class CollisionManager:
                     self._damage_enemy(enemy, bullet.damage)
                     bullet.kill()
 
-    def _damage_player(self, damage: float) -> None:
-        """Applies damage to the player, absorbed first by armor."""
+    def _damage_player(self, damage: float) -> bool:
+        """Applies damage to the player, absorbed first by armor.
+
+        Rolls the player's evasion first: on a successful dodge, returns False
+        without touching armor/hp at all. Returns True if the hit landed.
+        """
+        if random.random() < self.game.player.evasion:
+            logger.debug("Player evaded a hit (evasion=%.2f)", self.game.player.evasion)
+            return False
+
         damage_to_deal = damage
         if self.game.player.armor > 0:
             absorption = int(damage_to_deal * 0.6)
@@ -81,6 +95,7 @@ class CollisionManager:
         self.game.player.hp -= damage_to_deal
         if self.game.player.hp <= 0:
             self._trigger_game_over()
+        return True
 
     def _trigger_game_over(self) -> None:
         """Centralized transition to the defeat state, with matching sounds."""
@@ -92,7 +107,19 @@ class CollisionManager:
         self.game.sound.stop_music()
 
     def _damage_enemy(self, enemy, damage: float) -> None:
-        """Applies damage to an enemy: flat passive reduction first, then armor absorption."""
+        """Applies damage to an enemy: evasion roll, then flat passive reduction, then armor absorption.
+
+        A dodged hit still alerts the enemy (the bullet visibly reached them,
+        even if it didn't land) but leaves hp/armor untouched.
+        """
+        enemy.is_alerted = True
+        enemy.last_known_player_pos = pygame.math.Vector2(self.game.player.pos)
+        enemy.lose_interest_timer = ENEMY_LOSE_INTEREST_TIME
+
+        if random.random() < getattr(enemy, "evasion", 0.0):
+            logger.debug("Enemy evaded a hit (evasion=%.2f)", getattr(enemy, "evasion", 0.0))
+            return
+
         damage_to_deal = max(0.0, damage - getattr(enemy, "damage_reduction_flat", 0.0))
         if enemy.armor > 0:
             absorption = int(damage_to_deal * 0.5)
@@ -103,9 +130,6 @@ class CollisionManager:
                 damage_to_deal -= enemy.armor
                 enemy.armor = 0
         enemy.hp -= damage_to_deal
-        enemy.is_alerted = True
-        enemy.last_known_player_pos = pygame.math.Vector2(self.game.player.pos)
-        enemy.lose_interest_timer = ENEMY_LOSE_INTEREST_TIME
         if enemy.hp <= 0:
             enemy.kill()
             self.game.sound.play("enemy_death")

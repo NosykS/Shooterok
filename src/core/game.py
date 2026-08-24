@@ -1,5 +1,6 @@
 # src/core/game.py
 import logging
+import random
 
 import pygame
 
@@ -341,9 +342,12 @@ class Game:
         the knife) and is scaled by the player's class damage_mult, same as ranged attacks.
         """
         if not enemy.is_alerted:
+            # Stealth takedown: the enemy never sees it coming, so evasion doesn't apply
             enemy.hp = 0
             e_type = getattr(enemy, "enemy_type", getattr(enemy, "type", "unknown"))
             logger.info("Silent melee takedown! Enemy %s eliminated.", e_type)
+        elif random.random() < getattr(enemy, "evasion", 0.0):
+            logger.info("Melee attack missed — enemy dodged (evasion=%.2f)", enemy.evasion)
         else:
             raw_damage = self.player.weapon_stats["damage"] * self.player.damage_mult
             melee_damage = max(0.0, raw_damage - getattr(enemy, "damage_reduction_flat", 0.0))
