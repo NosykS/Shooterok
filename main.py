@@ -1,4 +1,5 @@
 # main.py
+import gc
 import logging
 import sys
 
@@ -14,6 +15,16 @@ def main() -> None:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
+
+    # The cyclic garbage collector's periodic sweep was causing a reproducible
+    # stutter mid-gameplay (profiled 24.08.2026 — a full gc.collect() pass over
+    # the level's object graph, e.g. right after a level load builds a lot of
+    # short-lived objects). Reference counting already frees the vast majority
+    # of game objects immediately with GC disabled; LevelManager.reset_game_world
+    # runs a manual collect() at level-load time instead, where a brief pause
+    # is invisible to the player, so cyclic garbage (e.g. sprite<->group refs)
+    # still gets reclaimed rather than growing unbounded over a long session.
+    gc.disable()
 
     # Initialize Pygame and create the game window
     pygame.init()

@@ -1,4 +1,5 @@
 # src/core/level_manager.py
+import gc
 import logging
 
 import pygame
@@ -18,6 +19,10 @@ class LevelManager:
     def __init__(self, game) -> None:
         self.game = game
         self.tmx_data: pytmx.TiledMap | None = None
+        # Pre-rendered floor/decorations layers for the current level, built
+        # once per load; draw_floor() blits this instead of redrawing every
+        # tile every frame.
+        self.floor_surface: pygame.Surface | None = None
 
     def generate_collision_matrix(self) -> list[list[int]]:
         """
@@ -67,9 +72,10 @@ class LevelManager:
         self.game.obstacles = pygame.sprite.Group()
         self.game.hiding_spots = pygame.sprite.Group()
 
-        # Reset the pathfinding matrix/grid before loading the new level
+        # Reset the pathfinding matrix/grid and cached floor before loading the new level
         self.game.game_matrix = None
         self.game.pathfinding_grid = None
+        self.floor_surface = None
 
         # 2. Determine the map file name from the current mission
         mission_num = self.game.missions.current_mission_num
@@ -91,6 +97,7 @@ class LevelManager:
             # --- GENERATE THE COLLISION MATRIX RIGHT AFTER BUILDING WALLS ---
             self.game.game_matrix = self.generate_collision_matrix()
             self.game.pathfinding_grid = self._build_pathfinding_grid(self.game.game_matrix)
+            self.floor_surface = self._build_floor_surface()
 
             player_spawn_pos, enemies_to_spawn = self._process_spawn_points(player_spawn_pos, enemies_to_spawn)
 
@@ -106,6 +113,12 @@ class LevelManager:
 
         self.game.gunshot_visual_timer = 0
         self.game.knife_visual_timer = 0
+
+        # Reclaim any cyclic garbage from the sprites/groups just torn down
+        # above (main.py disables automatic GC to avoid a mid-gameplay stutter;
+        # this is the safe point to run it manually instead — level load already
+        # takes a moment, so a brief collect() here is invisible to the player).
+        gc.collect()
 
     def _load_tmx_map(self, map_path: str) -> None:
         """Loads the TMX map and updates world/camera bounds to match it."""
@@ -221,23 +234,32 @@ class LevelManager:
             self.game.enemies.add(enemy)
             self.game.all_sprites.add(enemy)
 
-    def draw_floor(self, surface: pygame.Surface, camera) -> None:
-        """Draws the floor layer beneath all sprites, accounting for the camera offset."""
-        if not self.tmx_data:
-            surface.fill((30, 30, 30))
-            return
+    def _build_floor_surface(self) -> pygame.Surface:
+        """Pre-renders the static floor/decorations layers to one offscreen surface.
 
-        offset_x = camera.camera_rect.x
-        offset_y = camera.camera_rect.y
+        Built once per level load; draw_floor() then blits this whole surface
+        with the camera offset every frame (SDL clips it to the visible area
+        automatically) instead of iterating and blitting every tile
+        individually each frame — that per-tile redraw was a real hot spot
+        (profiled 24.08.2026, see RPG_CLASS_SYSTEM.md section 8.4).
+        """
+        world_w = self.tmx_data.width * self.tmx_data.tilewidth
+        world_h = self.tmx_data.height * self.tmx_data.tileheight
+        floor_surface = pygame.Surface((world_w, world_h), pygame.SRCALPHA).convert_alpha()
 
         for layer in self.tmx_data.visible_layers:
             if isinstance(layer, pytmx.TiledTileLayer) and layer.name in ["floor", "decorations"]:
                 for x, y, gid in layer:
                     tile = self.tmx_data.get_tile_image_by_gid(gid)
                     if tile:
-                        pos_x = x * self.tmx_data.tilewidth + offset_x
-                        pos_y = y * self.tmx_data.tileheight + offset_y
+                        floor_surface.blit(tile, (x * self.tmx_data.tilewidth, y * self.tmx_data.tileheight))
 
-                        if -self.tmx_data.tilewidth < pos_x < surface.get_width() and \
-                                -self.tmx_data.tileheight < pos_y < surface.get_height():
-                            surface.blit(tile, (pos_x, pos_y))
+        return floor_surface
+
+    def draw_floor(self, surface: pygame.Surface, camera) -> None:
+        """Draws the floor layer beneath all sprites, accounting for the camera offset."""
+        if not self.tmx_data or self.floor_surface is None:
+            surface.fill((30, 30, 30))
+            return
+
+        surface.blit(self.floor_surface, (camera.camera_rect.x, camera.camera_rect.y))

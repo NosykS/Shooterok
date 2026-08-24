@@ -20,6 +20,22 @@ from src.core.sprite_loader import load_character_sprite
 # request instead of constructing a fresh one per call.
 _PATHFINDER = AStarFinder(diagonal_movement=DiagonalMovement.never)
 
+# One reusable full-screen scratch surface for vision-cone drawing, instead of
+# allocating a fresh pygame.Surface for every enemy on every frame — that
+# allocation was a real hot spot (profiled 24.08.2026, see
+# RPG_CLASS_SYSTEM.md section 8.4). Each enemy clears and redraws onto it,
+# then blits immediately, before the next enemy's draw reuses it. Created
+# lazily (not at import time) since building a Surface before pygame.init()
+# has run can misbehave.
+_vision_cone_surface: pygame.Surface | None = None
+
+
+def _get_vision_cone_surface() -> pygame.Surface:
+    global _vision_cone_surface
+    if _vision_cone_surface is None:
+        _vision_cone_surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+    return _vision_cone_surface
+
 
 class Enemy(pygame.sprite.Sprite):
     def __init__(
@@ -215,7 +231,8 @@ class Enemy(pygame.sprite.Sprite):
         """Draws the enemy's field-of-view cone, accounting for camera offset."""
         cone_color = (255, 0, 0, 40) if self.is_alerted else (0, 255, 0, 30)
 
-        vision_surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        vision_surface = _get_vision_cone_surface()
+        vision_surface.fill((0, 0, 0, 0))  # Clear whatever the previous enemy drew
 
         screen_pos = self.pos + pygame.math.Vector2(camera.camera_rect.x, camera.camera_rect.y)
         points = [screen_pos]
