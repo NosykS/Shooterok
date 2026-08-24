@@ -16,7 +16,7 @@ class CrosshairController:
         pygame.mouse.set_visible(False)
         mouse_pos = pygame.mouse.get_pos()
 
-        if player.current_weapon == "knife":
+        if player.weapon_stats.get("is_melee", False):
             # Convert the screen-space mouse position to world coordinates
             world_mouse = camera.screen_to_world(mouse_pos)
 
@@ -41,7 +41,7 @@ class CrosshairController:
         """Draws the crosshair matching the currently equipped weapon."""
         x, y = self.screen_pos
 
-        if player.current_weapon == "knife":
+        if player.weapon_stats.get("is_melee", False):
             # Melee crosshair: ring with a center dot
             pygame.draw.circle(screen, (255, 80, 80), (x, y), 6, 2)
             pygame.draw.circle(screen, (255, 255, 255), (x, y), 2)

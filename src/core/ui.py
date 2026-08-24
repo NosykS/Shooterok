@@ -114,6 +114,50 @@ class UISlider:
         screen.blit(label_surf, (self.rect.left, self.rect.top - 26))
 
 
+def draw_gear_icons(surface: pygame.Surface, weapon_name: str, off_hand: str | None) -> None:
+    """Draws small procedural icons for gear that has no dedicated sprite art yet.
+
+    Several melee weapons (hammer, dual_swords) reuse the generic "hold" pose
+    (see WEAPONS sprite_suffix in settings.py) and off-hand items (shield,
+    scepter) aren't drawn on the character at all — this adds a cheap visual
+    cue directly onto the character surface so classes read differently at a
+    glance, without needing real sprite art. Coordinates are proportional to
+    the surface size so this works across the different Hitman-pose dimensions.
+    """
+    w, h = surface.get_size()
+
+    # Calibrated against the actual "hold"/"gun" sprites: both hands sit on the
+    # character's right side (upper ~0.78w,0.20h and lower ~0.72w,0.80h), and
+    # the "gun" pose's pistol extends right-and-up from the lower hand.
+    lower_hand = (w * 0.72, h * 0.80)
+    upper_hand = (w * 0.78, h * 0.20)
+
+    if weapon_name == "hammer":
+        handle_end = (w * 0.99, h * 0.48)
+        pygame.draw.line(surface, (130, 85, 40), lower_hand, handle_end, 4)
+        pygame.draw.circle(surface, (225, 225, 235), handle_end, max(4, int(w * 0.18)))
+        pygame.draw.circle(surface, (60, 60, 70), handle_end, max(4, int(w * 0.18)), 1)
+    elif weapon_name == "dual_swords":
+        pygame.draw.line(surface, (235, 235, 245), upper_hand, (w * 1.05, h * -0.05), 3)
+        pygame.draw.line(surface, (235, 235, 245), lower_hand, (w * 1.05, h * 1.05), 3)
+        pygame.draw.circle(surface, (110, 65, 25), (int(upper_hand[0]), int(upper_hand[1])), 3)
+        pygame.draw.circle(surface, (110, 65, 25), (int(lower_hand[0]), int(lower_hand[1])), 3)
+
+    if off_hand == "shield":
+        # Opposite side from the weapon hands, at roughly shoulder height
+        shield_rect = pygame.Rect(0, 0, max(9, int(w * 0.34)), max(13, int(h * 0.42)))
+        shield_rect.center = (int(w * 0.08), int(h * 0.46))
+        pygame.draw.ellipse(surface, (60, 110, 170), shield_rect)
+        pygame.draw.ellipse(surface, (230, 200, 60), shield_rect, 2)
+    elif off_hand == "scepter":
+        # A staff held on the off-hand side, topped with a bright gem
+        rod_top = (w * 0.1, h * 0.18)
+        rod_bottom = (w * 0.1, h * 0.75)
+        pygame.draw.line(surface, (150, 110, 60), rod_bottom, rod_top, 3)
+        pygame.draw.circle(surface, (210, 70, 220), (int(rod_top[0]), int(rod_top[1])), max(3, int(w * 0.14)))
+        pygame.draw.circle(surface, (255, 255, 255), (int(rod_top[0]), int(rod_top[1])), max(3, int(w * 0.14)), 1)
+
+
 def draw_controls_help(screen: pygame.Surface, font_ui: pygame.font.Font) -> None:
     """Draws the on-screen controls hint using the game's UI font."""
     controls = [

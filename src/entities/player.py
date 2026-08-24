@@ -11,6 +11,7 @@ from src.settings import (
 from src.objects.bullet import Bullet
 from src.core.physics import get_nearby_obstacles, resolve_axis_collision
 from src.core.sprite_loader import load_character_sprite
+from src.core.ui import draw_gear_icons
 
 logger = logging.getLogger(__name__)
 
@@ -76,13 +77,16 @@ class Player(pygame.sprite.Sprite):
         image_path = f"assets/images/{folder_name}/{character_prefix}_{suffix}.png"
 
         surface = load_character_sprite(image_path)
-        if surface is not None:
-            return surface
+        if surface is None:
+            # Fallback placeholder in case the sprite file is missing
+            surface = pygame.Surface((50, 50), pygame.SRCALPHA).convert_alpha()
+            pygame.draw.circle(surface, (0, 128, 255), (25, 25), 20)
+            pygame.draw.line(surface, (255, 0, 0), (25, 25), (50, 25), 4)
 
-        # Fallback placeholder in case the sprite file is missing
-        surface = pygame.Surface((50, 50), pygame.SRCALPHA).convert_alpha()
-        pygame.draw.circle(surface, (0, 128, 255), (25, 25), 20)
-        pygame.draw.line(surface, (255, 0, 0), (25, 25), (50, 25), 4)
+        # Cheap visual cue for gear with no dedicated sprite art (hammer/dual_swords
+        # share the generic "hold" pose; off-hand items aren't drawn at all otherwise)
+        class_def = CLASS_DEFINITIONS.get(self.player_class, {})
+        draw_gear_icons(surface, self._current_weapon, class_def.get("off_hand"))
         return surface
 
     @property

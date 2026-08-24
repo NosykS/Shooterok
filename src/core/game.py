@@ -17,12 +17,28 @@ from src.core.mission_manager import MissionManager
 from src.core.collision_manager import CollisionManager
 from src.core.level_manager import LevelManager
 from src.core.input_handler import InputHandler
-from src.core.save_manager import SaveManager
+from src.core.save_manager import SaveManager, MAX_CHARACTER_SLOTS
 from src.core.progression_manager import ProgressionManager
 from src.core.shop_manager import ShopManager
 from src.core.sound_manager import SoundManager
 
 logger = logging.getLogger(__name__)
+
+# Short display label per RPG subtype (CLASS_DEFINITIONS key), used on the
+# class-select grid and to label characters on the character-select screen.
+# Order matches CLASS_DEFINITIONS, grouped 3 per row for the select-screen grid.
+CLASS_SUBTYPE_LABELS: list[tuple[str, str]] = [
+    ("tank_melee", "Танк: Ближній (Молот)"),
+    ("tank_ranged", "Танк: Дальній (Дробовик)"),
+    ("dd_melee", "DD: Ближній (Мечі)"),
+    ("dd_ranged_glass", "DD: Снайпер (Glass Cannon)"),
+    ("dd_ranged_mid", "DD: Штурмовик (АГ)"),
+    ("heal_hot", "Лікар: HoT (Пістолет)"),
+    ("heal_direct", "Лікар: Директ (Пістолет)"),
+    ("support_buff", "Підтримка: Баф (Пістолет)"),
+    ("support_control", "Підтримка: Контроль (Пістолет)"),
+]
+CLASS_SUBTYPE_LABEL_MAP: dict[str, str] = dict(CLASS_SUBTYPE_LABELS)
 
 
 class Game:
@@ -30,13 +46,19 @@ class Game:
         """Initializes the game core, state managers, and subsystems."""
         self.screen = screen
         self.clock = pygame.time.Clock()
-        self.game_state = "MENU"
+        self.game_state = "CHARACTER_SELECT"
         self.running = True
 
-        self.profile_data = SaveManager.load_game()
+        # Top-level save: settings are shared across characters, progress isn't
+        # (see save_manager.DEFAULT_SAVE). self.profile_data below is a *reference*
+        # into save_data["characters"] once a character is picked/created, so
+        # mutating it (as most of the codebase already does) mutates save_data too.
+        self.save_data = SaveManager.load_game()
 
-        self.progression = ProgressionManager(self.profile_data)
-        self.shop = ShopManager(self.profile_data)
+        # No character selected yet — set once CHARACTER_SELECT/CLASS_SELECT finish.
+        self.profile_data: dict | None = None
+        self.progression: ProgressionManager | None = None
+        self.shop: ShopManager | None = None
 
         # Sprite groups (managed via LevelManager)
         self.player = None
@@ -49,7 +71,7 @@ class Game:
 
         self.camera = Camera(WORLD_WIDTH, WORLD_HEIGHT)
 
-        saved_settings = self.profile_data.get("settings", {})
+        saved_settings = self.save_data["settings"]
         self.sound = SoundManager(
             sfx_volume=saved_settings.get("sfx_volume", 1.0),
             music_volume=saved_settings.get("music_volume", 1.0)
@@ -59,6 +81,8 @@ class Game:
         self.settings_return_state = "MENU"
         # Frame counter for the brief "game saved" visual confirmation
         self.save_feedback_timer = 0
+        # Character index armed for deletion (needs a second confirming click); None = no pending delete
+        self.pending_delete_index: int | None = None
 
         # Map memory
         self.saved_game_matrix = None
@@ -71,7 +95,10 @@ class Game:
 
         self.knife_visual_timer = 0
         self.knife_visual_pos = (0, 0)
-        self.knife_attack_radius = WEAPONS["knife"].get("damage_radius", 60)
+        # Radius the swing visual/hit-check used at the moment of the last melee
+        # attack — captured then (not read live) so switching weapons mid-swing
+        # doesn't retroactively change an already-triggered attack's reach.
+        self.knife_visual_radius = WEAPONS["knife"].get("damage_radius", 60)
 
         pygame.font.init()
         self.pause_font_title = pygame.font.SysFont("Arial", 48, bold=True)
@@ -113,6 +140,62 @@ class Game:
         # Update base_speed specifically to avoid conflicts during sprint/stealth
         self.player.base_speed = 4 * (1.0 + (speed_level * 0.1))
 
+    def create_character(self, subtype: str) -> None:
+        """Creates a new character with the chosen RPG subtype, auto-grants its
+        main_hand weapon, adds it to the save, and makes it the active character."""
+        class_def = CLASS_DEFINITIONS.get(subtype)
+        if class_def is None:
+            logger.warning("Unknown class subtype selected: %s", subtype)
+            return
+
+        if len(self.save_data["characters"]) >= MAX_CHARACTER_SLOTS:
+            logger.warning("Character slots full (%d) — cannot create another.", MAX_CHARACTER_SLOTS)
+            return
+
+        character = SaveManager.create_character()
+        character["player_class"] = subtype
+
+        main_hand = class_def.get("main_hand")
+        if main_hand:
+            character["unlocked_weapons"].append(main_hand)
+            character["equipped_weapon"] = main_hand
+
+        self.save_data["characters"].append(character)
+        self._activate_character(len(self.save_data["characters"]) - 1)
+        SaveManager.save_game(self.save_data)
+        logger.info("Character created: %s (main hand: %s)", subtype, main_hand)
+
+    def select_character(self, index: int) -> None:
+        """Makes an existing character (by index in save_data['characters']) the active one."""
+        if not (0 <= index < len(self.save_data["characters"])):
+            logger.warning("Invalid character index selected: %s", index)
+            return
+        self._activate_character(index)
+
+    def _activate_character(self, index: int) -> None:
+        """Points profile_data/progression/shop at the given character slot."""
+        self.profile_data = self.save_data["characters"][index]
+        self.progression = ProgressionManager(self.profile_data)
+        self.shop = ShopManager(self.profile_data)
+
+    def delete_character(self, index: int) -> None:
+        """Permanently removes a character's progress from the save."""
+        characters = self.save_data["characters"]
+        if not (0 <= index < len(characters)):
+            logger.warning("Invalid character index to delete: %s", index)
+            return
+
+        removed = characters.pop(index)
+
+        # If the deleted character was the active one, drop the now-dangling reference
+        if self.profile_data is removed:
+            self.profile_data = None
+            self.progression = None
+            self.shop = None
+
+        SaveManager.save_game(self.save_data)
+        logger.info("Character deleted (slot %s, class %s)", index, removed.get("player_class"))
+
     def _init_ui_buttons(self) -> None:
         """Initializes interactive UI buttons for every menu screen."""
         cx, cy = SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2
@@ -129,17 +212,21 @@ class Game:
             UIButton(cx, cy + 138, 260, 45, "Вийти з гри", self.pause_font_btn, red_b, red_h, "QUIT")
         ]
         self.main_menu_buttons = [
-            UIButton(cx, cy - 105, 260, 45, "ПРОДОВЖИТИ", self.pause_font_btn, b_color, h_color, "CONTINUE_GAME"),
-            UIButton(cx, cy - 45, 260, 45, "НОВА ГРА", self.pause_font_btn, b_color, h_color, "NEW_GAME"),
-            UIButton(cx, cy + 15, 260, 45, "НАЛАШТУВАННЯ", self.pause_font_btn, b_color, h_color, "OPEN_SETTINGS"),
-            UIButton(cx, cy + 75, 260, 45, "ВИХІД", self.pause_font_btn, red_b, red_h, "QUIT")
+            UIButton(cx, cy - 130, 260, 45, "ПРОДОВЖИТИ", self.pause_font_btn, b_color, h_color, "CONTINUE_GAME"),
+            UIButton(cx, cy - 75, 260, 45, "НОВА ГРА", self.pause_font_btn, b_color, h_color, "NEW_GAME"),
+            UIButton(cx, cy - 20, 260, 45, "ЗМІНИТИ ПЕРСОНАЖА", self.pause_font_btn, b_color, h_color, "CHANGE_CHARACTER"),
+            UIButton(cx, cy + 35, 260, 45, "НАЛАШТУВАННЯ", self.pause_font_btn, b_color, h_color, "OPEN_SETTINGS"),
+            UIButton(cx, cy + 90, 260, 45, "ВИХІД", self.pause_font_btn, red_b, red_h, "QUIT")
         ]
         self.settings_buttons = [
             UIButton(cx, cy + 150, 260, 45, "Назад", self.pause_font_btn, b_color, h_color, "SETTINGS_BACK"),
         ]
+        self.class_select_buttons = self._build_class_select_buttons(cx, cy, b_color, h_color)
+        self.character_select_buttons: list[UIButton] = []
+        self.refresh_character_select_buttons()
         self.settings_sliders = [
-            UISlider(cx, cy - 40, 320, 20, "Гучність музики", self.hud_small_font, self.profile_data["settings"]["music_volume"]),
-            UISlider(cx, cy + 40, 320, 20, "Гучність ефектів", self.hud_small_font, self.profile_data["settings"]["sfx_volume"]),
+            UISlider(cx, cy - 40, 320, 20, "Гучність музики", self.hud_small_font, self.save_data["settings"]["music_volume"]),
+            UISlider(cx, cy + 40, 320, 20, "Гучність ефектів", self.hud_small_font, self.save_data["settings"]["sfx_volume"]),
         ]
         self.game_over_buttons = [
             UIButton(cx, cy + 20, 260, 45, "СПРОБУВАТИ ЗНОВУ", self.pause_font_btn, b_color, h_color, "RESTART"),
@@ -172,10 +259,66 @@ class Game:
             UIButton(cx + 210, cy + 25, 75, 25, "1000$", self.hud_small_font, b_color, h_color, "BUY_WEAPON_SHOTGUN")
         ]
 
+    def _build_class_select_buttons(self, cx: int, cy: int, b_color, h_color) -> list[UIButton]:
+        """Builds one button per RPG subtype (CLASS_DEFINITIONS key), laid out in a 3x3 grid."""
+        labels = CLASS_SUBTYPE_LABELS
+        col_offsets = [-260, 0, 260]
+        row_offsets = [-140, -70, 0]
+
+        buttons = []
+        for idx, (subtype, label) in enumerate(labels):
+            col, row = idx % 3, idx // 3
+            btn_x = cx + col_offsets[col]
+            btn_y = cy + row_offsets[row]
+            buttons.append(UIButton(
+                btn_x, btn_y, 230, 55, label, self.hud_small_font,
+                b_color, h_color, f"SELECT_CLASS:{subtype}"
+            ))
+
+        buttons.append(UIButton(cx, cy + 90, 230, 45, "Назад", self.pause_font_btn, b_color, h_color, "CLASS_SELECT_BACK"))
+        return buttons
+
+    def refresh_character_select_buttons(self) -> None:
+        """Rebuilds the character-select button list from save_data["characters"].
+
+        Called at init and whenever the list changes (a character was just
+        created/deleted) or the screen is entered, since the character count
+        and pending-delete confirmation state both vary.
+        """
+        cx, cy = SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2
+        b_color, h_color = (40, 45, 55), (60, 80, 110)
+        green_b, green_h = (35, 120, 65), (45, 160, 85)
+        red_b, red_h = (120, 35, 35), (160, 45, 45)
+        confirm_b, confirm_h = (170, 90, 20), (210, 115, 30)
+        characters = self.save_data["characters"]
+
+        buttons = []
+        for idx, character in enumerate(characters):
+            class_label = CLASS_SUBTYPE_LABEL_MAP.get(character.get("player_class"), "?")
+            label = f"Персонаж {idx + 1}: {class_label} (Рівень {character.get('player_level', 1)})"
+            btn_y = cy - 190 + idx * 65
+            buttons.append(UIButton(cx - 30, btn_y, 380, 50, label, self.hud_small_font, b_color, h_color, f"PICK_CHARACTER:{idx}"))
+
+            if self.pending_delete_index == idx:
+                buttons.append(UIButton(cx + 230, btn_y, 90, 50, "Точно?", self.hud_small_font,
+                                         confirm_b, confirm_h, f"DELETE_CHARACTER:{idx}"))
+            else:
+                buttons.append(UIButton(cx + 230, btn_y, 60, 50, "✕", self.pause_font_btn,
+                                         red_b, red_h, f"DELETE_CHARACTER:{idx}"))
+
+        if len(characters) < MAX_CHARACTER_SLOTS:
+            btn_y = cy - 190 + len(characters) * 65
+            buttons.append(UIButton(cx - 30, btn_y, 380, 50, "+ Створити персонажа", self.hud_small_font,
+                                     green_b, green_h, "CREATE_CHARACTER"))
+
+        buttons.append(UIButton(cx, cy + 150, 260, 45, "ВИХІД", self.pause_font_btn, red_b, red_h, "QUIT"))
+        self.character_select_buttons = buttons
+
     def execute_knife_attack(self) -> None:
-        """Computes the melee damage arc for the player's knife attack."""
+        """Computes the melee damage arc for the player's currently equipped melee weapon."""
         self.knife_visual_timer = 6
         self.knife_visual_pos = (int(self.player.pos.x), int(self.player.pos.y))
+        self.knife_visual_radius = self.player.weapon_stats.get("damage_radius", 60)
 
         player_angle = self.player.angle_to_mouse(self.camera)
 
@@ -183,7 +326,7 @@ class Game:
             enemy_vec = enemy.pos - self.player.pos
             distance = enemy_vec.length()
 
-            if distance < self.knife_attack_radius and distance > 0:
+            if distance < self.knife_visual_radius and distance > 0:
                 angle_to_enemy = enemy_vec.as_polar()[1]
                 angle_diff = (angle_to_enemy - player_angle) % 360
                 if angle_diff > 180: angle_diff = 360 - angle_diff
@@ -252,7 +395,11 @@ class Game:
 
     def update(self) -> None:
         """Per-frame update of game object state and simulation logic."""
-        self.crosshair_ctrl.update(self.player, self.camera, self.knife_attack_radius, self.game_state)
+        # self.player can be None before a character/mission is active (menus,
+        # character select); guard so the crosshair's melee-range clamp doesn't
+        # crash reading weapon_stats off a None player.
+        melee_radius = self.player.weapon_stats.get("damage_radius", 60) if self.player else 60
+        self.crosshair_ctrl.update(self.player, self.camera, melee_radius, self.game_state)
         self._sync_background_music()
 
         if self.save_feedback_timer > 0:
@@ -324,7 +471,7 @@ class Game:
             if self.game_state == "VICTORY":
                 self.profile_data["current_level"] += 1
 
-            SaveManager.save_game(self.profile_data)
+            SaveManager.save_game(self.save_data)
             logger.info("[SAVE] Autosave successful! Reward: +%s$ | +%s XP", mission_money, mission_xp)
 
     def _sync_background_music(self) -> None:
@@ -336,6 +483,10 @@ class Game:
 
     def draw(self) -> None:
         """Renders the current frame's graphics layers."""
+        if self.game_state == "CHARACTER_SELECT":
+            self._draw_character_select_screen()
+            return
+
         if self.game_state == "MENU":
             self._draw_menu_screen()
             return
@@ -346,6 +497,10 @@ class Game:
 
         if self.game_state == "SETTINGS":
             self._draw_settings_screen()
+            return
+
+        if self.game_state == "CLASS_SELECT":
+            self._draw_class_select_screen()
             return
 
         self._draw_world()
@@ -359,8 +514,17 @@ class Game:
     def _draw_menu_screen(self) -> None:
         """Renders the main menu screen."""
         self.screen.fill((15, 20, 30))
+        cx = SCREEN_WIDTH // 2
         title = self.pause_font_title.render("STEALTH ACTION", True, (0, 150, 255))
-        self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 190)))
+        self.screen.blit(title, title.get_rect(center=(cx, SCREEN_HEIGHT // 2 - 235)))
+
+        class_label = CLASS_SUBTYPE_LABEL_MAP.get(self.profile_data.get("player_class"), "?")
+        active_text = self.hud_small_font.render(
+            f"Активний персонаж: {class_label} (Рівень {self.profile_data.get('player_level', 1)})",
+            True, (150, 200, 255)
+        )
+        self.screen.blit(active_text, active_text.get_rect(center=(cx, SCREEN_HEIGHT // 2 - 185)))
+
         for btn in self.main_menu_buttons:
             btn.draw(self.screen)
 
@@ -390,7 +554,7 @@ class Game:
                 self.gunshot_visual_timer -= 1
 
         if self.knife_visual_timer > 0:
-            draw_knife_swing(self.screen, self.camera, self.player, self.knife_attack_radius)
+            draw_knife_swing(self.screen, self.camera, self.player, self.knife_visual_radius)
             if self.game_state == "PLAYING":
                 self.knife_visual_timer -= 1
 
@@ -483,6 +647,38 @@ class Game:
         if self.game_state == "PAUSE" and self.save_feedback_timer > 0:
             toast = self.hud_small_font.render("Гру збережено!", True, (100, 255, 150))
             self.screen.blit(toast, toast.get_rect(center=(SCREEN_WIDTH // 2, m_rect.bottom - 20)))
+
+    def _draw_character_select_screen(self) -> None:
+        """Renders the character-select screen: pick an existing character or create a new one."""
+        self.screen.fill((15, 20, 30))
+        cx = SCREEN_WIDTH // 2
+
+        title = self.pause_font_title.render("ПЕРСОНАЖІ", True, (0, 150, 255))
+        self.screen.blit(title, title.get_rect(center=(cx, 90)))
+
+        subtitle = self.hud_small_font.render(
+            f"Оберіть персонажа або створіть нового (макс. {MAX_CHARACTER_SLOTS})", True, (180, 180, 180)
+        )
+        self.screen.blit(subtitle, subtitle.get_rect(center=(cx, 130)))
+
+        for btn in self.character_select_buttons:
+            btn.draw(self.screen)
+
+    def _draw_class_select_screen(self) -> None:
+        """Renders the character-creation screen: pick a new character's RPG subtype directly."""
+        self.screen.fill((15, 20, 30))
+        cx = SCREEN_WIDTH // 2
+
+        title = self.pause_font_title.render("ОБЕРІТЬ КЛАС", True, (0, 150, 255))
+        self.screen.blit(title, title.get_rect(center=(cx, 90)))
+
+        subtitle = self.hud_small_font.render(
+            "Клас визначає стати, дозволену зброю та стартову екіпіровку", True, (180, 180, 180)
+        )
+        self.screen.blit(subtitle, subtitle.get_rect(center=(cx, 130)))
+
+        for btn in self.class_select_buttons:
+            btn.draw(self.screen)
 
     def _draw_settings_screen(self) -> None:
         """Renders the settings screen (music/SFX volume sliders)."""

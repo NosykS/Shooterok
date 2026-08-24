@@ -4,6 +4,7 @@ import logging
 import pygame
 
 from src.core.save_manager import SaveManager
+from src.settings import CLASS_DEFINITIONS
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,34 @@ class InputHandler:
             self.game.player.toggle_hiding_spot(self.game.hiding_spots)
 
     def _handle_weapon_hotkey(self, key: int) -> None:
-        """Switches the equipped weapon based on its unlocked-slot index."""
+        """Switches the equipped weapon.
+
+        Once a class is chosen, allowed_weapons is always exactly [knife, main_hand]
+        (see Player._is_weapon_allowed), so K_1/K_2 map to those two directly rather
+        than to fixed weapon names — otherwise a class whose main_hand isn't one of
+        the 4 legacy names (pistol_silenced/shotgun/rifle) could never be re-equipped
+        once the player switched off it.
+        """
+        class_def = CLASS_DEFINITIONS.get(self.game.player.player_class)
+
+        if class_def:
+            self._handle_classed_weapon_hotkey(key, class_def)
+        else:
+            self._handle_legacy_weapon_hotkey(key)
+
+    def _handle_classed_weapon_hotkey(self, key: int, class_def: dict) -> None:
+        """K_1 = knife, K_2 = the current class's main_hand. K_3/K_4 are unused —
+        allowed_weapons never has more than those two entries."""
+        unlocked = self.game.profile_data.get("unlocked_weapons", [])
+        main_hand = class_def.get("main_hand")
+
+        if key == pygame.K_1 and "knife" in unlocked:
+            self.game.player.change_weapon(unlocked.index("knife"))
+        elif key == pygame.K_2 and main_hand and main_hand in unlocked:
+            self.game.player.change_weapon(unlocked.index(main_hand))
+
+    def _handle_legacy_weapon_hotkey(self, key: int) -> None:
+        """Pre-class-system fallback: fixed slots for the 4 original weapons."""
         unlocked = self.game.profile_data.get("unlocked_weapons", [])
 
         if key == pygame.K_1 and "knife" in unlocked:
@@ -82,7 +110,11 @@ class InputHandler:
         if event.type != pygame.KEYDOWN:
             return
 
-        if self.game.game_state == "MENU":
+        if self.game.game_state == "CHARACTER_SELECT":
+            if event.key == pygame.K_ESCAPE:
+                self.game.running = False
+
+        elif self.game.game_state == "MENU":
             if event.key == pygame.K_SPACE:
                 current_level = self.game.profile_data.get("current_level", 1)
                 self.game.missions.load_mission(current_level)
@@ -93,8 +125,12 @@ class InputHandler:
 
         elif self.game.game_state == "SETTINGS":
             if event.key == pygame.K_ESCAPE:
-                SaveManager.save_game(self.game.profile_data)
+                SaveManager.save_game(self.game.save_data)
                 self.game.game_state = self.game.settings_return_state
+
+        elif self.game.game_state == "CLASS_SELECT":
+            if event.key == pygame.K_ESCAPE:
+                self.game.game_state = "CHARACTER_SELECT"
 
         elif self.game.game_state == "GAME_OVER":
             if event.key == pygame.K_r:
@@ -139,8 +175,8 @@ class InputHandler:
 
         self.game.sound.set_music_volume(music_slider.value)
         self.game.sound.set_sfx_volume(sfx_slider.value)
-        self.game.profile_data["settings"]["music_volume"] = music_slider.value
-        self.game.profile_data["settings"]["sfx_volume"] = sfx_slider.value
+        self.game.save_data["settings"]["music_volume"] = music_slider.value
+        self.game.save_data["settings"]["sfx_volume"] = sfx_slider.value
 
     def _update_ui_button_actions(self, mouse_pos: tuple[int, int], mouse_click: tuple[bool, bool, bool]) -> None:
         """Handles mouse clicks on the currently active screen's UI buttons."""
@@ -161,6 +197,8 @@ class InputHandler:
             "VICTORY_ALL": self.game.victory_all_buttons,
             "SHOP": self.game.shop_buttons,
             "SETTINGS": self.game.settings_buttons,
+            "CLASS_SELECT": self.game.class_select_buttons,
+            "CHARACTER_SELECT": self.game.character_select_buttons,
         }
         return buttons_by_state.get(self.game.game_state, [])
 
@@ -180,15 +218,33 @@ class InputHandler:
             current_level = self.game.profile_data.get("current_level", 1)
             self.game.missions.load_mission(current_level)
             self._reset_player_shot_timer()
+        elif action == "CHANGE_CHARACTER":
+            self.game.pending_delete_index = None
+            self.game.refresh_character_select_buttons()
+            self.game.game_state = "CHARACTER_SELECT"
+        elif action == "CREATE_CHARACTER":
+            self.game.pending_delete_index = None
+            self.game.game_state = "CLASS_SELECT"
+        elif action.startswith("PICK_CHARACTER:"):
+            self.game.pending_delete_index = None
+            self.game.select_character(int(action.split(":", 1)[1]))
+            self.game.game_state = "MENU"
+        elif action.startswith("DELETE_CHARACTER:"):
+            self._handle_delete_character(int(action.split(":", 1)[1]))
+        elif action.startswith("SELECT_CLASS:"):
+            self.game.create_character(action.split(":", 1)[1])
+            self.game.game_state = "MENU"
+        elif action == "CLASS_SELECT_BACK":
+            self.game.game_state = "CHARACTER_SELECT"
         elif action == "OPEN_SETTINGS":
             # Remember where to return to (main menu or pause)
             self.game.settings_return_state = self.game.game_state
             self.game.game_state = "SETTINGS"
         elif action == "SETTINGS_BACK":
-            SaveManager.save_game(self.game.profile_data)
+            SaveManager.save_game(self.game.save_data)
             self.game.game_state = self.game.settings_return_state
         elif action == "SAVE_GAME":
-            SaveManager.save_game(self.game.profile_data)
+            SaveManager.save_game(self.game.save_data)
             self.game.save_feedback_timer = 90  # ~1.5s at 60 FPS
             logger.info("Game saved manually.")
         elif action == "CONTINUE":
@@ -217,31 +273,41 @@ class InputHandler:
         else:
             self._handle_shop_action(action)
 
+    def _handle_delete_character(self, index: int) -> None:
+        """First click arms deletion (button turns into a 'Точно?' confirm);
+        a second click on the same, now-armed button actually deletes."""
+        if self.game.pending_delete_index == index:
+            self.game.delete_character(index)
+            self.game.pending_delete_index = None
+        else:
+            self.game.pending_delete_index = index
+        self.game.refresh_character_select_buttons()
+
     def _handle_shop_action(self, action: str) -> None:
         """Handles skill-point upgrades and weapon purchases in the shop screen."""
         if action == "BUY_UPGRADE_HP":
             if self.game.progression.upgrade_skill("max_hp"):
-                SaveManager.save_game(self.game.profile_data)
+                SaveManager.save_game(self.game.save_data)
                 # Refresh the current player's stats right after the purchase!
                 self.game.apply_player_upgrades()
                 logger.info("Health upgraded successfully!")
         elif action == "BUY_UPGRADE_ARMOR":
             if self.game.progression.upgrade_skill("max_armor"):
-                SaveManager.save_game(self.game.profile_data)
+                SaveManager.save_game(self.game.save_data)
                 self.game.apply_player_upgrades()
                 logger.info("Armor upgraded successfully!")
         elif action == "BUY_UPGRADE_SPEED":
             if self.game.progression.upgrade_skill("speed"):
-                SaveManager.save_game(self.game.profile_data)
+                SaveManager.save_game(self.game.save_data)
                 self.game.apply_player_upgrades()
                 logger.info("Speed upgraded successfully!")
         elif action == "BUY_WEAPON_RIFLE":
             success, msg = self.game.shop.buy_weapon("rifle")
             logger.info(msg)
             if success:
-                SaveManager.save_game(self.game.profile_data)
+                SaveManager.save_game(self.game.save_data)
         elif action == "BUY_WEAPON_SHOTGUN":
             success, msg = self.game.shop.buy_weapon("shotgun")
             logger.info(msg)
             if success:
-                SaveManager.save_game(self.game.profile_data)
+                SaveManager.save_game(self.game.save_data)

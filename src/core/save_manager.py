@@ -9,7 +9,11 @@ logger = logging.getLogger(__name__)
 
 SAVE_FILE = "savegame.json"
 
-DEFAULT_DATA: dict[str, Any] = {
+# How many character slots a player can have at once. Kept small since character
+# selection has no scrolling/pagination UI yet.
+MAX_CHARACTER_SLOTS = 4
+
+DEFAULT_CHARACTER: dict[str, Any] = {
     "current_level": 1,
     "money": 500,
     "xp": 0,
@@ -22,61 +26,68 @@ DEFAULT_DATA: dict[str, Any] = {
     },
     "unlocked_weapons": ["knife", "pistol_silenced"],
     "equipped_weapon": "pistol_silenced",
-    "player_class": None,  # RPG subclass key (e.g. "dd_melee"); None until class selection UI exists
+    "player_class": None,  # RPG subclass key (e.g. "dd_melee"); set at character creation
     "unlocked_skills": [],  # Pending/assigned RPG skill slots; see ProgressionManager
+}
+
+# Top-level save shape: settings are shared across all characters, progress is not.
+DEFAULT_SAVE: dict[str, Any] = {
     "settings": {
         "music_volume": 1.0,
         "sfx_volume": 1.0
-    }
+    },
+    "characters": [],
 }
 
 
 class SaveManager:
     @staticmethod
     def load_game() -> dict[str, Any]:
-        """Loads player data. Creates default data if no save file exists."""
+        """Loads the save file (shared settings + the character list). Creates a default one if missing."""
         if not os.path.exists(SAVE_FILE):
-            SaveManager.save_game(DEFAULT_DATA)
-            return copy.deepcopy(DEFAULT_DATA)
+            SaveManager.save_game(DEFAULT_SAVE)
+            return copy.deepcopy(DEFAULT_SAVE)
 
         try:
             with open(SAVE_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
-                # Guard against old saves missing fields: fill in defaults.
-                # deepcopy so a save never ends up sharing a list/dict instance
-                # with DEFAULT_DATA itself (mutating one would otherwise leak
-                # into every other save loaded afterward in the same run).
-                for key, value in DEFAULT_DATA.items():
-                    if key not in data:
-                        data[key] = copy.deepcopy(value)
-
-                if "skill_points" not in data:
-                    data["skill_points"] = 0
-
-                # Guard against old saves missing volume settings
                 data.setdefault("settings", {})
-                for key, value in DEFAULT_DATA["settings"].items():
+                for key, value in DEFAULT_SAVE["settings"].items():
                     data["settings"].setdefault(key, value)
 
-                # AUTO-FIX FOR OLD SAVES: repair the equipped weapon id
-                if data.get("equipped_weapon") == "pistol":
-                    data["equipped_weapon"] = "pistol_silenced"
-
-                # Repair the unlocked weapons list too
-                if "unlocked_weapons" in data:
-                    for idx, wp in enumerate(data["unlocked_weapons"]):
-                        if wp == "pistol":
-                            data["unlocked_weapons"][idx] = "pistol_silenced"
+                data.setdefault("characters", [])
+                for character in data["characters"]:
+                    SaveManager._repair_character(character)
 
                 return data
         except (OSError, json.JSONDecodeError):
             logger.error("Failed to load save file", exc_info=True)
-            return copy.deepcopy(DEFAULT_DATA)
+            return copy.deepcopy(DEFAULT_SAVE)
+
+    @staticmethod
+    def _repair_character(character: dict[str, Any]) -> None:
+        """Fills in fields missing from an older character save, in place."""
+        for key, value in DEFAULT_CHARACTER.items():
+            if key not in character:
+                character[key] = copy.deepcopy(value)
+
+        # AUTO-FIX FOR OLD SAVES: repair the equipped weapon id
+        if character.get("equipped_weapon") == "pistol":
+            character["equipped_weapon"] = "pistol_silenced"
+
+        for idx, wp in enumerate(character["unlocked_weapons"]):
+            if wp == "pistol":
+                character["unlocked_weapons"][idx] = "pistol_silenced"
+
+    @staticmethod
+    def create_character() -> dict[str, Any]:
+        """Returns a fresh character profile, not yet attached to any save."""
+        return copy.deepcopy(DEFAULT_CHARACTER)
 
     @staticmethod
     def save_game(data: dict[str, Any]) -> None:
-        """Writes the current data to the JSON save file."""
+        """Writes the current save data (settings + characters) to the JSON save file."""
         try:
             with open(SAVE_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=4, ensure_ascii=False)

@@ -67,6 +67,7 @@ WEAPONS: dict[str, dict[str, Any]] = {
         "bullet_speed": 0,
         "shoot_cooldown": 500,
         "is_melee": True,
+        "damage_radius": 50,     # Shortest reach — a plain knife, not a polearm
         "sprite_suffix": "hold",
     },
     "hammer": {
@@ -77,6 +78,7 @@ WEAPONS: dict[str, dict[str, Any]] = {
         "bullet_speed": 0,
         "shoot_cooldown": 900,    # Heavy, slow swings (tank_melee main hand)
         "is_melee": True,
+        "damage_radius": 90,      # Longest reach — heavy two-handed weapon
         "sprite_suffix": "hold",
     },
     "dual_swords": {
@@ -87,6 +89,7 @@ WEAPONS: dict[str, dict[str, Any]] = {
         "bullet_speed": 0,
         "shoot_cooldown": 280,    # Fast paired strikes (dd_melee main hand)
         "is_melee": True,
+        "damage_radius": 75,      # Longer than a knife — twin blades extend the reach
         "sprite_suffix": "hold",
     },
     "pistol": {
