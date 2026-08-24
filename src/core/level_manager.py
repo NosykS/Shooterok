@@ -4,7 +4,7 @@ import logging
 import pygame
 import pytmx
 
-from src.settings import TILE_SIZE, ENEMY_TYPES
+from src.settings import TILE_SIZE, ENEMY_TYPES, CLASS_DEFINITIONS
 from src.entities.player import Player
 from src.entities.enemy import Enemy
 from src.objects.obstacle import Obstacle
@@ -144,11 +144,15 @@ class LevelManager:
 
         return player_spawn_pos, enemies_to_spawn
 
-    def _parse_enemy_spawn(self, obj) -> tuple[float, float, str, list[tuple[float, float]]]:
-        """Reads an enemy's type and optional custom patrol route from its Tiled properties."""
+    def _parse_enemy_spawn(self, obj) -> tuple[float, float, str, str | None, list[tuple[float, float]]]:
+        """Reads an enemy's type, optional RPG class, and optional custom patrol route from its Tiled properties."""
         enemy_type = obj.properties.get("enemy_type", "rookie")
         if enemy_type not in ENEMY_TYPES:
             enemy_type = "rookie"
+
+        enemy_class = obj.properties.get("enemy_class")
+        if enemy_class not in CLASS_DEFINITIONS:
+            enemy_class = None
 
         # Custom patrol route format in Tiled (string): "100,200;400,200;400,500"
         custom_patrol_raw = obj.properties.get("patrol", "")
@@ -162,7 +166,7 @@ class LevelManager:
             except ValueError:
                 logger.warning("Failed to parse enemy patrol route: %s", custom_patrol_raw, exc_info=True)
 
-        return obj.x, obj.y, enemy_type, custom_patrol
+        return obj.x, obj.y, enemy_type, enemy_class, custom_patrol
 
     def _spawn_hiding_spot(self, obj) -> None:
         """Creates a HidingSpot sprite, reading an optional custom exit point from Tiled."""
@@ -186,10 +190,13 @@ class LevelManager:
 
     def _spawn_enemies(self, enemies_to_spawn: list[tuple]) -> None:
         """Instantiates enemies now that the pathfinding matrix is ready."""
-        for x, y, enemy_type, custom_patrol in enemies_to_spawn:
+        player_level = self.game.profile_data.get("player_level", 1)
+        for x, y, enemy_type, enemy_class, custom_patrol in enemies_to_spawn:
             enemy = Enemy(
                 x, y,
                 enemy_type=enemy_type,
+                enemy_class=enemy_class,
+                player_level=player_level,
                 game_matrix=self.game.game_matrix,
                 custom_patrol=custom_patrol if custom_patrol else None
             )

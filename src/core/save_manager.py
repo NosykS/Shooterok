@@ -1,4 +1,5 @@
 # src/core/save_manager.py
+import copy
 import json
 import logging
 import os
@@ -21,6 +22,8 @@ DEFAULT_DATA: dict[str, Any] = {
     },
     "unlocked_weapons": ["knife", "pistol_silenced"],
     "equipped_weapon": "pistol_silenced",
+    "player_class": None,  # RPG subclass key (e.g. "dd_melee"); None until class selection UI exists
+    "unlocked_skills": [],  # Pending/assigned RPG skill slots; see ProgressionManager
     "settings": {
         "music_volume": 1.0,
         "sfx_volume": 1.0
@@ -34,16 +37,19 @@ class SaveManager:
         """Loads player data. Creates default data if no save file exists."""
         if not os.path.exists(SAVE_FILE):
             SaveManager.save_game(DEFAULT_DATA)
-            return DEFAULT_DATA.copy()
+            return copy.deepcopy(DEFAULT_DATA)
 
         try:
             with open(SAVE_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
-                # Guard against old saves missing fields: fill in defaults
+                # Guard against old saves missing fields: fill in defaults.
+                # deepcopy so a save never ends up sharing a list/dict instance
+                # with DEFAULT_DATA itself (mutating one would otherwise leak
+                # into every other save loaded afterward in the same run).
                 for key, value in DEFAULT_DATA.items():
                     if key not in data:
-                        data[key] = value
+                        data[key] = copy.deepcopy(value)
 
                 if "skill_points" not in data:
                     data["skill_points"] = 0
@@ -66,7 +72,7 @@ class SaveManager:
                 return data
         except (OSError, json.JSONDecodeError):
             logger.error("Failed to load save file", exc_info=True)
-            return DEFAULT_DATA.copy()
+            return copy.deepcopy(DEFAULT_DATA)
 
     @staticmethod
     def save_game(data: dict[str, Any]) -> None:

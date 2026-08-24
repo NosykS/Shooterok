@@ -198,6 +198,13 @@ CLASS_DEFINITIONS: dict[str, dict[str, Any]] = {
         "range_type": "melee",
         "main_hand": "hammer",
         "off_hand": "shield",
+        "allowed_weapons": ["knife", "hammer"],
+        # Cumulative enemy passive buffs per unlocked passive slot (see ENEMY_SKILL_UNLOCK_LEVELS)
+        "passive_buffs_per_tier": [
+            {"damage_reduction_flat": 2, "hp_regen_per_sec": 0.2},
+            {"damage_reduction_flat": 2, "hp_regen_per_sec": 0.2},
+            {"damage_reduction_flat": 1, "hp_regen_per_sec": 0.1},
+        ],
     },
     "tank_ranged": {
         "base_class": "tank",
@@ -208,6 +215,12 @@ CLASS_DEFINITIONS: dict[str, dict[str, Any]] = {
         "range_type": "ranged",
         "main_hand": "combat_shotgun",
         "off_hand": "shield",
+        "allowed_weapons": ["knife", "combat_shotgun"],
+        "passive_buffs_per_tier": [
+            {"damage_reduction_flat": 1, "hp_regen_per_sec": 0.1},
+            {"damage_reduction_flat": 1, "hp_regen_per_sec": 0.1},
+            {"damage_reduction_flat": 1, "hp_regen_per_sec": 0.1},
+        ],
     },
     "dd_melee": {
         "base_class": "dd",
@@ -218,6 +231,12 @@ CLASS_DEFINITIONS: dict[str, dict[str, Any]] = {
         "range_type": "melee",
         "main_hand": "dual_swords",
         "off_hand": None,          # Both hands wielding the paired swords
+        "allowed_weapons": ["knife", "dual_swords"],
+        "passive_buffs_per_tier": [
+            {"damage_reduction_flat": 1, "hp_regen_per_sec": 0.1},
+            {"damage_reduction_flat": 0, "hp_regen_per_sec": 0.1},
+            {"damage_reduction_flat": 0, "hp_regen_per_sec": 0.0},
+        ],
     },
     "dd_ranged_glass": {
         "base_class": "dd",
@@ -228,6 +247,13 @@ CLASS_DEFINITIONS: dict[str, dict[str, Any]] = {
         "range_type": "ranged",
         "main_hand": "sniper_rifle",
         "off_hand": None,
+        "allowed_weapons": ["knife", "sniper_rifle"],
+        # Glass cannon: no defensive passives at all
+        "passive_buffs_per_tier": [
+            {"damage_reduction_flat": 0, "hp_regen_per_sec": 0.0},
+            {"damage_reduction_flat": 0, "hp_regen_per_sec": 0.0},
+            {"damage_reduction_flat": 0, "hp_regen_per_sec": 0.0},
+        ],
     },
     "dd_ranged_mid": {
         "base_class": "dd",
@@ -238,6 +264,12 @@ CLASS_DEFINITIONS: dict[str, dict[str, Any]] = {
         "range_type": "ranged",
         "main_hand": "assault_rifle",
         "off_hand": None,
+        "allowed_weapons": ["knife", "assault_rifle"],
+        "passive_buffs_per_tier": [
+            {"damage_reduction_flat": 1, "hp_regen_per_sec": 0.05},
+            {"damage_reduction_flat": 0, "hp_regen_per_sec": 0.05},
+            {"damage_reduction_flat": 0, "hp_regen_per_sec": 0.05},
+        ],
     },
     "heal_hot": {
         "base_class": "heal",
@@ -248,6 +280,13 @@ CLASS_DEFINITIONS: dict[str, dict[str, Any]] = {
         "range_type": "mid",       # No shields; multiple stacking HoT effects
         "main_hand": "pistol",
         "off_hand": "scepter",
+        "allowed_weapons": ["knife", "pistol"],
+        # Highest regen — thematically matches the HoT specialization
+        "passive_buffs_per_tier": [
+            {"damage_reduction_flat": 0, "hp_regen_per_sec": 0.2},
+            {"damage_reduction_flat": 0, "hp_regen_per_sec": 0.2},
+            {"damage_reduction_flat": 0, "hp_regen_per_sec": 0.2},
+        ],
     },
     "heal_direct": {
         "base_class": "heal",
@@ -258,6 +297,12 @@ CLASS_DEFINITIONS: dict[str, dict[str, Any]] = {
         "range_type": "ranged",    # Instant heal on cast
         "main_hand": "pistol",
         "off_hand": "scepter",
+        "allowed_weapons": ["knife", "pistol"],
+        "passive_buffs_per_tier": [
+            {"damage_reduction_flat": 0, "hp_regen_per_sec": 0.1},
+            {"damage_reduction_flat": 1, "hp_regen_per_sec": 0.1},
+            {"damage_reduction_flat": 0, "hp_regen_per_sec": 0.1},
+        ],
     },
     "support_buff": {
         "base_class": "support",
@@ -268,6 +313,12 @@ CLASS_DEFINITIONS: dict[str, dict[str, Any]] = {
         "range_type": "mid",
         "main_hand": "pistol",
         "off_hand": "scepter",
+        "allowed_weapons": ["knife", "pistol"],
+        "passive_buffs_per_tier": [
+            {"damage_reduction_flat": 1, "hp_regen_per_sec": 0.1},
+            {"damage_reduction_flat": 1, "hp_regen_per_sec": 0.1},
+            {"damage_reduction_flat": 0, "hp_regen_per_sec": 0.0},
+        ],
     },
     "support_control": {
         "base_class": "support",
@@ -278,8 +329,34 @@ CLASS_DEFINITIONS: dict[str, dict[str, Any]] = {
         "range_type": "mid",
         "main_hand": "pistol",
         "off_hand": "scepter",
+        "allowed_weapons": ["knife", "pistol"],
+        "passive_buffs_per_tier": [
+            {"damage_reduction_flat": 1, "hp_regen_per_sec": 0.1},
+            {"damage_reduction_flat": 1, "hp_regen_per_sec": 0.1},
+            {"damage_reduction_flat": 0, "hp_regen_per_sec": 0.05},
+        ],
     },
 }
+
+# RPG skill unlock cadence: a new skill slot unlocks every 2nd level, alternating
+# active/passive starting with active at level 2 (RPG_CLASS_SYSTEM.md section 4) —
+# 10 slots total (5 active + 5 passive) by level 20. No skill catalog exists yet
+# (see section 7), so ProgressionManager only tracks *when* a slot unlocks and its
+# type; slots stay pending (skill_id=None) until a catalog + selection UI exist.
+SKILL_UNLOCK_LEVELS: list[int] = [2, 4, 6, 8, 10, 12, 14, 16, 18, 20]
+
+# Enemy skill unlock cadence (RPG_CLASS_SYSTEM.md section 5): a fixed 5-slot kit per
+# class (3 passive + 2 active), tied to player_level rather than the enemy's own
+# leveling. Passive slots unlock first (no AI decision-making needed); active slots
+# are metadata-only for now — no active-skill catalog or trigger logic exists yet.
+# Passive slot count directly indexes CLASS_DEFINITIONS[...]["passive_buffs_per_tier"].
+ENEMY_SKILL_UNLOCK_LEVELS: list[dict[str, Any]] = [
+    {"level": 1, "type": "passive"},
+    {"level": 5, "type": "passive"},
+    {"level": 10, "type": "active"},
+    {"level": 15, "type": "passive"},
+    {"level": 20, "type": "active"},
+]
 
 # Player movement settings
 PLAYER_SPEED_NORMAL: int = 5

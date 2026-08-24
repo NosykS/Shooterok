@@ -5,7 +5,7 @@ import pygame
 
 from src.settings import (
     SCREEN_WIDTH, SCREEN_HEIGHT, FPS, BG_COLOR,
-    WEAPONS, WORLD_WIDTH, WORLD_HEIGHT, ENEMY_LOSE_INTEREST_TIME
+    WEAPONS, CLASS_DEFINITIONS, WORLD_WIDTH, WORLD_HEIGHT, ENEMY_LOSE_INTEREST_TIME
 )
 from src.core.ui import (
     draw_controls_help, draw_player_bars, draw_game_ui,
@@ -94,14 +94,18 @@ class Game:
         if not self.player:
             return
 
-        # 1. Health bonus: +20 HP per upgrade tier
+        class_def = CLASS_DEFINITIONS.get(self.player.player_class, {})
+        hp_mult = class_def.get("hp_mult", 1.0)
+        armor_mult = class_def.get("armor_mult", 1.0)
+
+        # 1. Health bonus: +20 HP per upgrade tier, scaled by the player's class
         hp_level = self.profile_data["upgrades"].get("max_hp", 0)
-        self.player.max_hp = 100 + (hp_level * 20)
+        self.player.max_hp = round((100 + hp_level * 20) * hp_mult)
         self.player.hp = self.player.max_hp
 
-        # 2. Armor bonus: +20 Armor per upgrade tier
+        # 2. Armor bonus: +20 Armor per upgrade tier, scaled by the player's class
         armor_level = self.profile_data["upgrades"].get("max_armor", 0)
-        self.player.max_armor = 50 + (armor_level * 20)
+        self.player.max_armor = round((50 + armor_level * 20) * armor_mult)
         self.player.armor = self.player.max_armor
 
         # 3. Speed bonus: +10% speed per upgrade tier
@@ -188,14 +192,20 @@ class Game:
                     self._apply_knife_hit(enemy)
 
     def _apply_knife_hit(self, enemy) -> None:
-        """Applies a single knife hit to an enemy: instant kill if unaware, damage otherwise."""
+        """Applies a single melee hit to an enemy: instant kill if unaware, damage otherwise.
+
+        Damage comes from the player's currently equipped melee weapon (not always
+        the knife) and is scaled by the player's class damage_mult, same as ranged attacks.
+        """
         if not enemy.is_alerted:
             enemy.hp = 0
             e_type = getattr(enemy, "enemy_type", getattr(enemy, "type", "unknown"))
-            logger.info("Silent knife takedown! Enemy %s eliminated.", e_type)
+            logger.info("Silent melee takedown! Enemy %s eliminated.", e_type)
         else:
-            enemy.hp -= WEAPONS["knife"]["damage"]
-            logger.info("Knife hit! Enemy HP: %s", enemy.hp)
+            raw_damage = self.player.weapon_stats["damage"] * self.player.damage_mult
+            melee_damage = max(0.0, raw_damage - getattr(enemy, "damage_reduction_flat", 0.0))
+            enemy.hp -= melee_damage
+            logger.info("Melee hit (%s)! Enemy HP: %s", self.player.current_weapon, enemy.hp)
 
         enemy.is_alerted = True
         enemy.last_known_player_pos = pygame.math.Vector2(self.player.pos)
@@ -214,7 +224,7 @@ class Game:
             attack_result = self.player.attack(self.camera)
 
             if attack_result == "melee":
-                self.sound.play_weapon("knife")
+                self.sound.play_weapon(self.player.current_weapon)
                 self.execute_knife_attack()
 
             elif attack_result:  # Expects a list [Bullet, Bullet, ...]

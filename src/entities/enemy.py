@@ -8,8 +8,8 @@ from pathfinding.finder.a_star import AStarFinder
 from pathfinding.core.diagonal_movement import DiagonalMovement
 
 from src.settings import (
-    ENEMY_TYPES, TILE_SIZE, ENEMY_LOSE_INTEREST_TIME,
-    WEAPONS, SCREEN_WIDTH, SCREEN_HEIGHT
+    ENEMY_TYPES, CLASS_DEFINITIONS, ENEMY_SKILL_UNLOCK_LEVELS, FPS, TILE_SIZE,
+    ENEMY_LOSE_INTEREST_TIME, WEAPONS, SCREEN_WIDTH, SCREEN_HEIGHT
 )
 from src.objects.bullet import Bullet
 from src.core.physics import get_nearby_obstacles, resolve_axis_collision
@@ -19,6 +19,7 @@ from src.core.sprite_loader import load_character_sprite
 class Enemy(pygame.sprite.Sprite):
     def __init__(
         self, x: float, y: float, enemy_type: str = "rookie",
+        enemy_class: str | None = None, player_level: int = 1,
         game_matrix: list[list[int]] | None = None,
         custom_patrol: list[tuple[float, float]] | None = None,
     ) -> None:
@@ -26,13 +27,39 @@ class Enemy(pygame.sprite.Sprite):
         self.type = enemy_type
         self.stats = ENEMY_TYPES[enemy_type]
 
+        # RPG subtype (e.g. "tank_melee"); None means no class assigned yet, so
+        # multipliers below default to 1.0 and behavior stays unchanged.
+        self.enemy_class = enemy_class
+        class_def = CLASS_DEFINITIONS.get(enemy_class, {})
+        hp_mult = class_def.get("hp_mult", 1.0)
+        armor_mult = class_def.get("armor_mult", 1.0)
+        self.damage_mult: float = class_def.get("damage_mult", 1.0)
+        self.evasion: float = class_def.get("evasion", 0.0)
+
+        # Fixed 5-slot skill kit (3 passive + 2 active), unlocked by player_level
+        # rather than the enemy's own progression (RPG_CLASS_SYSTEM.md section 5).
+        # Active slots are tracked but have no effect yet (no skill catalog/AI hook).
+        self.unlocked_skill_slots = [
+            slot for slot in ENEMY_SKILL_UNLOCK_LEVELS if slot["level"] <= player_level
+        ]
+        unlocked_passive_tiers = sum(
+            1 for slot in self.unlocked_skill_slots if slot["type"] == "passive"
+        )
+        passive_tiers = class_def.get("passive_buffs_per_tier", [])[:unlocked_passive_tiers]
+        self.damage_reduction_flat: float = sum(
+            tier.get("damage_reduction_flat", 0) for tier in passive_tiers
+        )
+        self.hp_regen_per_sec: float = sum(
+            tier.get("hp_regen_per_sec", 0) for tier in passive_tiers
+        )
+
         # Vitals and defense
-        self.hp = self.stats["hp"]
-        self.max_hp = self.stats["hp"]
+        self.hp = round(self.stats["hp"] * hp_mult)
+        self.max_hp = self.hp
         self.speed = self.stats["speed"]
         self.color = self.stats["color"]
-        self.armor = self.stats["armor"]
-        self.max_armor = self.stats["armor"]
+        self.armor = round(self.stats["armor"] * armor_mult)
+        self.max_armor = self.armor
 
         # Weapon and combat timers
         self.weapon = self.stats["weapon"]
@@ -323,6 +350,9 @@ class Enemy(pygame.sprite.Sprite):
         self.fired_bullet = None
         w_stats = WEAPONS[self.weapon]
 
+        if self.hp_regen_per_sec > 0 and self.hp < self.max_hp:
+            self.hp = min(self.max_hp, self.hp + self.hp_regen_per_sec / FPS)
+
         if not hasattr(self, "_stuck_check_pos"):
             self._stuck_check_pos = pygame.math.Vector2(self.pos)
             self._stuck_timer = 0
@@ -466,7 +496,7 @@ class Enemy(pygame.sprite.Sprite):
 
             self.fired_bullet = Bullet(
                 self.pos.x, self.pos.y, angle,
-                w_stats["damage"], w_stats["bullet_speed"], True
+                w_stats["damage"] * self.damage_mult, w_stats["bullet_speed"], True
             )
             self.shoot_cooldown = w_stats["shoot_cooldown"] // 16
 

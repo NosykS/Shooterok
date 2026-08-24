@@ -31,7 +31,8 @@ class CollisionManager:
 
     def _apply_melee_hit(self, enemy) -> None:
         """Damages and knocks back the player from a single melee strike."""
-        self.game.player.hp -= 10
+        base_melee_damage = 10
+        self.game.player.hp -= base_melee_damage * getattr(enemy, "damage_mult", 1.0)
         enemy.melee_cooldown = 60  # 1 second cooldown
 
         push_dir = self.game.player.pos - enemy.pos
@@ -91,8 +92,8 @@ class CollisionManager:
         self.game.sound.stop_music()
 
     def _damage_enemy(self, enemy, damage: float) -> None:
-        """Applies damage to an enemy, absorbed first by armor."""
-        damage_to_deal = damage
+        """Applies damage to an enemy: flat passive reduction first, then armor absorption."""
+        damage_to_deal = max(0.0, damage - getattr(enemy, "damage_reduction_flat", 0.0))
         if enemy.armor > 0:
             absorption = int(damage_to_deal * 0.5)
             if enemy.armor >= absorption:

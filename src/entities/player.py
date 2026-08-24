@@ -5,7 +5,7 @@ import random
 import pygame
 
 from src.settings import (
-    WEAPONS, PLAYER_SPEED_NORMAL,
+    WEAPONS, CLASS_DEFINITIONS, PLAYER_SPEED_NORMAL,
     PLAYER_SPEED_STEALTH, PLAYER_NOISE_NORMAL, PLAYER_NOISE_STEALTH
 )
 from src.objects.bullet import Bullet
@@ -19,6 +19,14 @@ class Player(pygame.sprite.Sprite):
     def __init__(self, game, x: float, y: float) -> None:
         super().__init__()
         self.game = game
+
+        # RPG subclass (e.g. "dd_melee"); None until a class-selection UI exists.
+        # hp_mult/armor_mult are applied separately in Game.apply_player_upgrades(),
+        # which is the single place max_hp/max_armor get computed.
+        self.player_class: str | None = self.game.profile_data.get("player_class")
+        class_def = CLASS_DEFINITIONS.get(self.player_class, {})
+        self.damage_mult: float = class_def.get("damage_mult", 1.0)
+        self.evasion: float = class_def.get("evasion", 0.0)
 
         # Load the weapon first so we know which sprite variant to load
         self._current_weapon: str = self.game.profile_data.get("equipped_weapon", "pistol_silenced")
@@ -168,11 +176,27 @@ class Player(pygame.sprite.Sprite):
             self.image = pygame.transform.rotate(self.base_image, angle)
             self.rect = self.image.get_rect(center=self.pos)
 
+    def _is_weapon_allowed(self, weapon_name: str) -> bool:
+        """Gear restriction: a class with allowed_weapons in CLASS_DEFINITIONS can
+        only equip those. No class assigned yet (player_class is None) -> unrestricted,
+        matching current behavior since there's no class-selection UI."""
+        class_def = CLASS_DEFINITIONS.get(self.player_class)
+        if class_def is None:
+            return True
+        return weapon_name in class_def.get("allowed_weapons", [])
+
     def change_weapon(self, index: int) -> None:
         unlocked = self.game.profile_data["unlocked_weapons"]
 
         if 0 <= index < len(unlocked):
             weapon_name = unlocked[index]
+
+            if not self._is_weapon_allowed(weapon_name):
+                logger.info(
+                    "Cannot equip %s: not in allowed_weapons for class %s",
+                    weapon_name, self.player_class
+                )
+                return
 
             self._current_weapon = weapon_name
             self.game.profile_data["equipped_weapon"] = weapon_name
@@ -223,6 +247,7 @@ class Player(pygame.sprite.Sprite):
         if dir_vector.length() > 0:
             _, base_angle = dir_vector.as_polar()
             weapon_falloff = stats.get("falloff", 1.0)
+            bullet_damage = stats["damage"] * self.damage_mult
 
             if self.current_weapon == "shotgun":
                 bullets = []
@@ -236,7 +261,7 @@ class Player(pygame.sprite.Sprite):
                         self.pos.x,
                         self.pos.y,
                         angle=pellet_angle,
-                        damage=stats["damage"],
+                        damage=bullet_damage,
                         speed=stats["bullet_speed"],
                         is_enemy_bullet=False,
                         falloff=weapon_falloff
@@ -249,7 +274,7 @@ class Player(pygame.sprite.Sprite):
                     self.pos.x,
                     self.pos.y,
                     angle=angle,
-                    damage=stats["damage"],
+                    damage=bullet_damage,
                     speed=stats["bullet_speed"],
                     is_enemy_bullet=False,
                     falloff=weapon_falloff
